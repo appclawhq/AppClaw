@@ -20,6 +20,7 @@ import { discoverAndSelectDevice } from './device-picker.js';
 import { setupSimulator, checkRealDeviceWDA } from './ios-setup.js';
 import { createPlatformSession } from './session.js';
 import type { SessionResult } from './session.js';
+import { isCloud, cloudProviderLabel } from './cloud.js';
 
 export interface DeviceSetupArgs {
   cliPlatform: Platform | null;
@@ -76,13 +77,13 @@ export async function setupDevice(
   });
 
   // Cloud mode: skip local device discovery and iOS setup entirely
-  if (args.config.CLOUD_PROVIDER === 'lambdatest') {
+  if (isCloud(args.config)) {
     const session = await createPlatformSession(mcp, args.config, platform, deviceType);
     return {
       platform,
       deviceType,
-      deviceName: args.config.LAMBDATEST_DEVICE_NAME || 'LambdaTest Cloud',
-      deviceUdid: 'lambdatest-cloud',
+      deviceName: args.config.CLOUD_DEVICE_NAME || `${cloudProviderLabel(args.config)} Cloud`,
+      deviceUdid: 'cloud',
       session,
       sessionId: session.sessionId,
       scopedMcp: session.scopedMcp,

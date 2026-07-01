@@ -117,6 +117,53 @@ PLATFORM=ios DEVICE_TYPE=simulator appclaw "Open Settings"
 
 > **Tip:** If only one simulator is booted, it's auto-selected — no `--udid` needed.
 
+### Cloud devices
+
+Run against a remote Appium grid — BrowserStack, Sauce Labs, LambdaTest, or any
+self-hosted grid — instead of a local device. Set `CLOUD_PROVIDER` and the
+`CLOUD_*` creds; AppClaw builds the hub URL, skips local device discovery, and
+routes the session to the grid. `appclaw init` can prompt for these and write
+them to `.env.example`.
+
+```bash
+# .env — BrowserStack
+CLOUD_PROVIDER=browserstack
+CLOUD_USERNAME=your-user
+CLOUD_ACCESS_KEY=your-key
+CLOUD_DEVICE_NAME=Google Pixel 8
+CLOUD_OS_VERSION=14
+CLOUD_APP=bs://<hashed-app-id>        # optional; app to install
+
+# Sauce Labs (region defaults to us-west-1; override with CLOUD_REGION)
+CLOUD_PROVIDER=saucelabs
+CLOUD_USERNAME=your-user
+CLOUD_ACCESS_KEY=your-key
+CLOUD_DEVICE_NAME=iPhone 14
+CLOUD_OS_VERSION=16
+
+# Self-hosted grid — bring your own hub URL (auth may be embedded)
+CLOUD_PROVIDER=custom
+CLOUD_SERVER_URL=https://user:key@grid.internal:4444/wd/hub
+CLOUD_DEVICE_NAME=Pixel_7
+CLOUD_OS_VERSION=14
+```
+
+AppClaw sets only the essentials (`platformName`, `appium:automationName`,
+device, OS, app). **Provider-specific options** — `bstack:options`,
+`sauce:options`, `lt:options`, real-vs-emulator flags, video, network logs — go
+in a capabilities file passed via `--caps` (or `CAPABILITIES_FILE` / the SDK
+`capabilitiesFile` option), which is merged on top and wins:
+
+```json
+// caps.json  →  appclaw --flow login.yaml --caps caps.json
+{
+  "bstack:options": { "projectName": "AppClaw", "buildName": "smoke", "networkLogs": true }
+}
+```
+
+`CLOUD_BUILD_NAME` / `CLOUD_PROJECT_NAME` are convenience shortcuts mapped into
+the active provider's namespace, so common dashboard labels don't need a caps file.
+
 ### Agent mode (LLM-driven)
 
 ```bash
@@ -495,6 +542,17 @@ All configuration is via `.env`:
 | **Output**            |                    |                                                                                                                                                                          |
 | `EXPORT_DIR`          | `.appclaw/exports` | Default directory for `--export` and `/export *.test.ts`. Bare filenames land here; paths with a directory hint are used verbatim. Override per-run with `--export-dir`. |
 | `MCP_DEBUG`           | `0`                | Stream verbose `[appium-mcp]` subprocess logs and per-tool timing. SDK can override via `mcpDebug` option.                                                               |
+| **Cloud devices**     |                    | See [Cloud devices](#cloud-devices) below                                                                                                                                |
+| `CLOUD_PROVIDER`      | (local)            | `browserstack`, `saucelabs`, `lambdatest`, or `custom`. Empty = local device.                                                                                            |
+| `CLOUD_USERNAME`      | —                  | Cloud account username (not required for `custom` when auth is in `CLOUD_SERVER_URL`)                                                                                    |
+| `CLOUD_ACCESS_KEY`    | —                  | Cloud access key / token                                                                                                                                                 |
+| `CLOUD_DEVICE_NAME`   | —                  | Remote device name, e.g. `Samsung Galaxy S24`, `iPhone 14`                                                                                                               |
+| `CLOUD_OS_VERSION`    | —                  | Remote OS version, e.g. `14`, `16`                                                                                                                                       |
+| `CLOUD_APP`           | —                  | App to install (provider-specific: `bs://…`, `lt://…`, `storage:…`, or an HTTP URL). Passed as `appium:app`.                                                             |
+| `CLOUD_BUILD_NAME`    | —                  | Dashboard build label — mapped into the provider's options namespace                                                                                                     |
+| `CLOUD_PROJECT_NAME`  | —                  | Dashboard project label                                                                                                                                                  |
+| `CLOUD_REGION`        | `us-west-1`        | Data-center region for Sauce Labs (ignored by other providers)                                                                                                           |
+| `CLOUD_SERVER_URL`    | (built-in)         | Full hub URL. **Required** for `CLOUD_PROVIDER=custom`; optional override for known providers. May embed `user:key@` auth.                                               |
 
 ## How It Works
 

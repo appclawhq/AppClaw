@@ -27,6 +27,7 @@ import { extractText } from '../mcp/tools.js';
 import { parseDeviceList } from '../device/device-picker.js';
 import { setupDevice } from '../device/index.js';
 import type { DeviceSetupArgs } from '../device/index.js';
+import { isCloud as isCloudConfig, cloudProviderLabel } from '../device/cloud.js';
 import { AppResolver } from '../agent/app-resolver.js';
 import { runYamlFlow } from './run-yaml-flow.js';
 import type { RunYamlFlowOptions, RunYamlFlowResult } from './run-yaml-flow.js';
@@ -145,7 +146,7 @@ async function runWorkerJob(
   platform: Platform
 ): Promise<WorkerFlowResult> {
   const label = chalk.cyan(`[worker:${workerIndex + 1}]`);
-  const isCloud = baseSetupArgs.config.CLOUD_PROVIDER === 'lambdatest';
+  const isCloud = isCloudConfig(baseSetupArgs.config);
 
   // setupDevice creates the Appium session and returns a session-scoped MCP
   // wrapper (scopedMcp). All subsequent tool calls go through scopedMcp so
@@ -154,7 +155,7 @@ async function runWorkerJob(
   // correct device regardless of appium-mcp's global select_device state.
   // Without this, concurrent workers race on the shared activeDevice global
   // in appium-mcp and both end up targeting the same physical device.
-  // Cloud mode: skip local port allocation — LambdaTest allocates sessions dynamically.
+  // Cloud mode: skip local port allocation — the grid allocates sessions dynamically.
   const {
     caps: workerCaps,
     mjpegUrl,
@@ -350,16 +351,16 @@ export async function runFlowOnDevices(
   const sharedMcp = await acquireSharedMCPClient(mcpConfig);
 
   try {
-    const isCloud = config.CLOUD_PROVIDER === 'lambdatest';
+    const isCloud = isCloudConfig(config);
     let selected: DiscoveredDevice[];
 
     if (isCloud) {
       ui.printInfo(
-        `Using LambdaTest cloud — ${parallelCount} parallel session(s) on ${config.LAMBDATEST_DEVICE_NAME}`
+        `Using ${cloudProviderLabel(config)} cloud — ${parallelCount} parallel session(s) on ${config.CLOUD_DEVICE_NAME}`
       );
       selected = Array.from({ length: parallelCount }, (_, i) => ({
-        name: `${config.LAMBDATEST_DEVICE_NAME} [${i + 1}]`,
-        udid: `lambdatest-cloud-${i + 1}`,
+        name: `${config.CLOUD_DEVICE_NAME} [${i + 1}]`,
+        udid: `cloud-${i + 1}`,
       }));
     } else {
       ui.printInfo(`Discovering ${platform} devices for ${parallelCount} parallel workers...`);
@@ -449,16 +450,16 @@ export async function runSuite(
   try {
     ui.printInfo(`Suite: ${suite.flows.length} flows, ${parallelCount} worker(s) on ${platform}`);
 
-    const isCloud = config.CLOUD_PROVIDER === 'lambdatest';
+    const isCloud = isCloudConfig(config);
     let selected: DiscoveredDevice[];
 
     if (isCloud) {
       ui.printInfo(
-        `Using LambdaTest cloud — ${parallelCount} parallel session(s) on ${config.LAMBDATEST_DEVICE_NAME}`
+        `Using ${cloudProviderLabel(config)} cloud — ${parallelCount} parallel session(s) on ${config.CLOUD_DEVICE_NAME}`
       );
       selected = Array.from({ length: parallelCount }, (_, i) => ({
-        name: `${config.LAMBDATEST_DEVICE_NAME} [${i + 1}]`,
-        udid: `lambdatest-cloud-${i + 1}`,
+        name: `${config.CLOUD_DEVICE_NAME} [${i + 1}]`,
+        udid: `cloud-${i + 1}`,
       }));
     } else {
       const devices = await discoverDevices(sharedMcp, platform, deviceType);

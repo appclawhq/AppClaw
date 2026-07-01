@@ -39,12 +39,23 @@ const theme = {
 type Platform = 'android' | 'ios';
 type Provider = 'anthropic' | 'openai' | 'gemini' | 'groq' | 'ollama';
 type AgentMode = 'dom' | 'vision';
+type CloudProvider = 'none' | 'browserstack' | 'saucelabs' | 'lambdatest' | 'custom';
+
+/** Cloud creds collected interactively (only when a provider other than 'none' is chosen). */
+interface CloudChoices {
+  provider: CloudProvider;
+  username: string;
+  accessKey: string;
+  deviceName: string;
+  osVersion: string;
+}
 
 interface InitChoices {
   dir: string;
   platform: Platform;
   provider: Provider;
   agentMode: AgentMode;
+  cloud: CloudChoices;
 }
 
 const PROVIDERS: { value: Provider; label: string }[] = [
@@ -207,6 +218,50 @@ const MODE_ITEMS: PickerItem<AgentMode>[] = [
   { value: 'dom', label: 'DOM', hint: 'fast, cheap — reads the UI tree' },
   { value: 'vision', label: 'Vision', hint: 'screenshot + AI — for canvas/games' },
 ];
+const CLOUD_ITEMS: PickerItem<CloudProvider>[] = [
+  { value: 'none', label: 'Local device', hint: 'emulator/simulator/USB — default' },
+  { value: 'browserstack', label: 'BrowserStack', hint: 'hub-cloud.browserstack.com' },
+  { value: 'saucelabs', label: 'Sauce Labs', hint: 'ondemand.<region>.saucelabs.com' },
+  { value: 'lambdatest', label: 'LambdaTest', hint: 'mobile-hub.lambdatest.com' },
+  { value: 'custom', label: 'Custom / self-hosted grid', hint: 'you provide the hub URL' },
+];
+
+/** Default: run on a local device, no cloud creds. */
+const NO_CLOUD: CloudChoices = {
+  provider: 'none',
+  username: '',
+  accessKey: '',
+  deviceName: '',
+  osVersion: '',
+};
+
+/**
+ * Collect cloud creds via the shared Prompter (works on both TTY and non-TTY).
+ * Returns NO_CLOUD when the user picks a local device. Access key is echoed as
+ * typed — readline has no masking here, so we note it rather than pretend.
+ */
+async function gatherCloud(p: Prompter, platform: Platform): Promise<CloudChoices> {
+  const provider = await p.choose<CloudProvider>(
+    'Run on a cloud device? (creds saved to .env.example — fill your .env)',
+    CLOUD_ITEMS,
+    'none'
+  );
+  if (provider === 'none') return NO_CLOUD;
+
+  const deviceHint = platform === 'ios' ? 'iPhone 14' : 'Samsung Galaxy S24';
+  const osHint = platform === 'ios' ? '16' : '14';
+  const username =
+    provider === 'custom'
+      ? await p.ask('Cloud username (blank if auth is in the hub URL)', '')
+      : await p.ask('Cloud username', '');
+  const accessKey =
+    provider === 'custom'
+      ? await p.ask('Cloud access key (blank if auth is in the hub URL)', '')
+      : await p.ask('Cloud access key', '');
+  const deviceName = await p.ask('Cloud device name', deviceHint);
+  const osVersion = await p.ask('Cloud OS version', osHint);
+  return { provider, username, accessKey, deviceName, osVersion };
+}
 
 async function gatherChoices(parsed: ParsedArgs): Promise<InitChoices> {
   if (parsed.yes) {
@@ -215,6 +270,7 @@ async function gatherChoices(parsed: ParsedArgs): Promise<InitChoices> {
       platform: parsed.platform ?? 'android',
       provider: parsed.provider ?? 'gemini',
       agentMode: 'dom',
+      cloud: NO_CLOUD,
     };
   }
 
@@ -238,7 +294,16 @@ async function gatherChoices(parsed: ParsedArgs): Promise<InitChoices> {
       prompt: 'Default agent mode? (↑/↓, Enter)',
       searchable: false,
     });
-    return { dir, platform, provider, agentMode };
+    // Cloud creds use the shared numbered Prompter (conditional follow-up prompts
+    // don't fit the single-shot arrow picker). It closes its own readline.
+    const p = new Prompter();
+    let cloud: CloudChoices;
+    try {
+      cloud = await gatherCloud(p, platform);
+    } finally {
+      p.close();
+    }
+    return { dir, platform, provider, agentMode, cloud };
   }
 
   // Non-TTY (piped / some IDE terminals) → one shared readline, numbered prompts.
@@ -252,7 +317,8 @@ async function gatherChoices(parsed: ParsedArgs): Promise<InitChoices> {
       parsed.provider ??
       (await p.choose<Provider>('Which LLM provider?', PROVIDER_ITEMS, 'gemini'));
     const agentMode = await p.choose<AgentMode>('Default agent mode?', MODE_ITEMS, 'dom');
-    return { dir, platform, provider, agentMode };
+    const cloud = await gatherCloud(p, platform);
+    return { dir, platform, provider, agentMode, cloud };
   } finally {
     p.close();
   }
@@ -314,13 +380,39 @@ AGENT_MODE=${c.agentMode}               # dom (fast) | vision (screenshot + AI)
 #MCP_DEBUG=false                        # verbose appium-mcp logs
 #LOCATOR_CACHE_ENABLED=off              # cache resolved DOM locators across runs
 
-# ── Cloud devices (LambdaTest) — uncomment to run on the cloud ─
-#CLOUD_PROVIDER=lambdatest
-#LAMBDATEST_USERNAME=
-#LAMBDATEST_ACCESS_KEY=
-#LAMBDATEST_DEVICE_NAME=Samsung Galaxy S24
-#LAMBDATEST_OS_VERSION=14
-#LAMBDATEST_APP=lt://APP...             # the app to install on the cloud device
+${cloudEnvBlock(c.cloud)}`;
+}
+
+/**
+ * Render the cloud-devices block. When the user picked a provider in `init`, the
+ * keys are active (with their entered values); otherwise the block is a commented
+ * reference. Provider-specific options (bstack:options / sauce:options / lt:options)
+ * are supplied via a --caps file, not env — see the note.
+ */
+function cloudEnvBlock(cloud: CloudChoices): string {
+  const on = cloud.provider !== 'none';
+  const c = (line: string) => (on ? line : `#${line}`);
+  const appExample: Record<Exclude<CloudProvider, 'none'>, string> = {
+    browserstack: 'bs://<hashed-app-id>',
+    saucelabs: 'storage:filename=app.apk',
+    lambdatest: 'lt://APP...',
+    custom: 'https://example.com/app.apk',
+  };
+  const provider: Exclude<CloudProvider, 'none'> =
+    cloud.provider === 'none' ? 'browserstack' : cloud.provider;
+  return `# ── Cloud devices — run on a remote Appium grid ──────────────
+#   Provider builds the hub URL + auth from the creds below. Provider-specific
+#   options (bstack:options / sauce:options / lt:options) go in a --caps JSON file.
+${c(`CLOUD_PROVIDER=${provider}`)}   # browserstack | saucelabs | lambdatest | custom
+${c(`CLOUD_USERNAME=${cloud.username}`)}
+${c(`CLOUD_ACCESS_KEY=${cloud.accessKey}`)}
+${c(`CLOUD_DEVICE_NAME=${cloud.deviceName || 'Samsung Galaxy S24'}`)}
+${c(`CLOUD_OS_VERSION=${cloud.osVersion || '14'}`)}
+#CLOUD_APP=${appExample[provider]}     # app to install on the cloud device (provider-specific format)
+#CLOUD_BUILD_NAME=                      # dashboard build label (→ provider's options namespace)
+#CLOUD_PROJECT_NAME=                    # dashboard project label
+#CLOUD_REGION=us-west-1                 # Sauce Labs data center (ignored by others)
+#CLOUD_SERVER_URL=                      # required for CLOUD_PROVIDER=custom; overrides the built-in hub for others
 `;
 }
 
