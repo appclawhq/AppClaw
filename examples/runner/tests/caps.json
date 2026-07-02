@@ -1,7 +1,8 @@
 {
   "android": {
-    "appium:app": "/Users/saikrishna/Documents/git/appium-demo/VodQA.apk",
+    "appium:app": "https://github.com/AppiumTestDistribution/appium-demo/raw/refs/heads/main/VodQA.apk",
     "appium:automationName": "UiAutomator2",
-    "appium:autoGrantPermissions": true
+    "appium:autoGrantPermissions": true,
+    "appium:mjpegServerPort": 0
   }
 }

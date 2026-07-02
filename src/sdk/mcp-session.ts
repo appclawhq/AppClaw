@@ -35,7 +35,10 @@ const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '0.0.0.0', '']);
  */
 export function isLocalNode(config: AppClawConfig): boolean {
   if (config.MCP_TRANSPORT === 'stdio') return true;
-  return LOCAL_HOSTS.has(config.MCP_HOST.trim().toLowerCase());
+  // A full MCP_URL wins over MCP_HOST — derive the host from it so a URL-only
+  // config (no explicit MCP_HOST) is still correctly classified as remote.
+  const host = config.MCP_URL ? new URL(config.MCP_URL).hostname : config.MCP_HOST;
+  return LOCAL_HOSTS.has(host.trim().toLowerCase());
 }
 
 /**
@@ -95,6 +98,7 @@ export class McpSession {
         transport: this.config.MCP_TRANSPORT,
         host: this.config.MCP_HOST,
         port: this.config.MCP_PORT,
+        url: this.config.MCP_URL || undefined,
       });
       const platform = (this.config.PLATFORM || 'android') as Platform;
       // Allocate unique ports per instance so parallel tests don't collide on

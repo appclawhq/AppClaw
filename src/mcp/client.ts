@@ -144,7 +144,10 @@ async function connectClient(config: MCPConfig): Promise<Client> {
       throw err;
     }
   } else {
-    const url = new URL(`http://${config.host}:${config.port}/sse`);
+    // Prefer the full URL when provided so the original scheme (https for
+    // ngrok/cloud tunnels) and path survive; fall back to the host:port form
+    // for a co-located node.
+    const url = new URL(config.url ?? `http://${config.host}:${config.port}/sse`);
     const transport = new SSEClientTransport(url);
     await client.connect(transport);
   }
@@ -192,7 +195,9 @@ export async function createMCPClient(config: MCPConfig): Promise<MCPClient> {
 
 /** Config key for deduplication */
 function configKey(config: MCPConfig): string {
-  return `${config.transport}:${config.host}:${config.port}`;
+  return config.url
+    ? `${config.transport}:${config.url}`
+    : `${config.transport}:${config.host}:${config.port}`;
 }
 
 interface SharedEntry {

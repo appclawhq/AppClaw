@@ -922,6 +922,7 @@ async function connectToDevice(): Promise<boolean> {
       transport: config.MCP_TRANSPORT,
       host: config.MCP_HOST,
       port: config.MCP_PORT,
+      url: config.MCP_URL || undefined,
     });
     state.mcp = mcpClient;
     ui.stopSpinner();

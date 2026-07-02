@@ -24,6 +24,7 @@ const OPTION_TO_ENV_VAR: Partial<Record<keyof AppClawOptions, string>> = {
   mcpTransport: 'MCP_TRANSPORT',
   mcpHost: 'MCP_HOST',
   mcpPort: 'MCP_PORT',
+  mcpUrl: 'MCP_URL',
   // `silent`, `video`, `report`, `reportName` are SDK-only — no env-var equivalents.
 };
 

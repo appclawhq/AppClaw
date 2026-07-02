@@ -132,6 +132,13 @@ export interface AppClawOptions {
   /** appium-mcp port when transport is 'sse'. Default: 8080. */
   mcpPort?: number;
   /**
+   * Full appium-mcp SSE URL (e.g. an https ngrok/cloud tunnel like
+   * `https://abc.ngrok-free.app/sse`). When set it takes precedence over
+   * `mcpHost`/`mcpPort` and preserves the scheme + path, so https tunnels and
+   * non-default ports work. Only used when transport is 'sse'.
+   */
+  mcpUrl?: string;
+  /**
    * Stream verbose appium-mcp logs (subprocess stderr + per-tool timing) to the console.
    * When `false`, suppresses these even if the `MCP_DEBUG=1` env var is set — useful for
    * keeping test output clean. When `true`, forces them on. When unset, defers to MCP_DEBUG.

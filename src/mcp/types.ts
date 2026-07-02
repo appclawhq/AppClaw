@@ -16,6 +16,12 @@ export interface MCPConfig {
   transport: 'stdio' | 'sse';
   host: string;
   port: number;
+  /**
+   * Full SSE endpoint URL (scheme + host + port + path). When set it is used
+   * verbatim instead of reconstructing `http://host:port/sse` — required for
+   * https tunnels (ngrok) and any non-default port or path.
+   */
+  url?: string;
 }
 
 /** Wrapper around MCP client for typed access */

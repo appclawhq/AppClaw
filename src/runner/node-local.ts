@@ -60,6 +60,12 @@ function resolveAppiumMcp(): { command: string; args: string[] } {
 export interface SSENode {
   host: string;
   port: number;
+  /**
+   * Full SSE endpoint URL for an externally-owned node (e.g. an https ngrok
+   * tunnel). Undefined for a locally-spawned node, which is always
+   * `http://host:port/sse` and reconstructed from host+port.
+   */
+  url?: string;
   stop(): Promise<void>;
   /**
    * The most recent appium-mcp server log lines (stdout+stderr), newest last.

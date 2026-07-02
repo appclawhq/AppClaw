@@ -65,6 +65,8 @@ export class Runner<State = unknown> {
   /** Address of the SSE node every leased session connects to (set in run()). */
   private nodeHost = '127.0.0.1';
   private nodePort = 0;
+  /** Full SSE URL when connecting to an external node; undefined for a local one. */
+  private nodeUrl?: string;
   /** Live view (TUI) or line output (plain) — chosen per run in run(). */
   private reporter: RunnerReporter = new PlainReporter();
   /** Suite identity for this run — tags every test's manifest + the report. */
@@ -88,6 +90,7 @@ export class Runner<State = unknown> {
       const { node, ownsNode } = await this.connectNode();
       this.nodeHost = node.host;
       this.nodePort = node.port;
+      this.nodeUrl = node.url;
       try {
         reporter.starting('Discovering devices…');
         const pool = await discoverPool(node, this.config.platform);
@@ -207,7 +210,11 @@ export class Runner<State = unknown> {
       const u = new URL(this.config.node.url);
       const node: SSENode = {
         host: u.hostname,
-        port: Number(u.port),
+        // `u.port` is '' for a default-port URL (https→443, http→80). Number('')
+        // is 0, and connecting to port 0 fails with EADDRNOTAVAIL — derive the
+        // scheme default instead. The full url below is what actually connects.
+        port: u.port ? Number(u.port) : u.protocol === 'https:' ? 443 : 80,
+        url: this.config.node.url,
         recentLog: () => '', // external server's process isn't ours to read
         async stop() {
           /* externally owned */
@@ -500,6 +507,7 @@ export class Runner<State = unknown> {
       mcpTransport: 'sse',
       mcpHost: this.nodeHost,
       mcpPort: this.nodePort,
+      mcpUrl: this.nodeUrl,
       deviceUdid: device.udid,
       platform: this.config.platform,
       reportName,

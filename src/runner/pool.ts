@@ -22,6 +22,7 @@ export async function discoverPool(node: SSENode, platform: Platform): Promise<D
     transport: 'sse',
     host: node.host,
     port: node.port,
+    url: node.url,
   });
   try {
     const result = await mcp.callTool('select_device', { platform });

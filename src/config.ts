@@ -44,6 +44,12 @@ const envSchema = z.object({
   MCP_TRANSPORT: z.enum(['stdio', 'sse']).default('stdio'),
   MCP_HOST: z.string().default('localhost'),
   MCP_PORT: z.coerce.number().default(8080),
+  /**
+   * Full appium-mcp SSE URL. When set (transport 'sse') it takes precedence over
+   * MCP_HOST/MCP_PORT and preserves scheme + path — required for https tunnels
+   * (ngrok) and non-default ports. Empty string means "reconstruct from host:port".
+   */
+  MCP_URL: z.string().default(''),
 
   /**
    * Android UiAutomator2: appium:mjpegScreenshotUrl — MJPEG stream URL for faster screenshots.

@@ -497,6 +497,7 @@ async function main() {
       transport: config.MCP_TRANSPORT,
       host: config.MCP_HOST,
       port: config.MCP_PORT,
+      url: config.MCP_URL || undefined,
     });
     const mcp = mcpClient;
 
@@ -573,6 +574,7 @@ async function main() {
           transport: config.MCP_TRANSPORT,
           host: config.MCP_HOST,
           port: config.MCP_PORT,
+          url: config.MCP_URL || undefined,
         });
         ui.stopSpinner();
         ui.printSetupOk('Connected to appium-mcp');
@@ -774,6 +776,7 @@ async function main() {
       transport: config.MCP_TRANSPORT,
       host: config.MCP_HOST,
       port: config.MCP_PORT,
+      url: config.MCP_URL || undefined,
     });
     const mcp = mcpClient;
 
@@ -956,6 +959,7 @@ async function main() {
     transport: config.MCP_TRANSPORT,
     host: config.MCP_HOST,
     port: config.MCP_PORT,
+    url: config.MCP_URL || undefined,
   });
 
   const mcp = mcpClient;
