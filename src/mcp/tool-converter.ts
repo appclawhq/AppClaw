@@ -50,6 +50,11 @@ export const EXCLUDED_MCP_TOOLS = new Set([
   // Documentation/skills tools — not relevant to device control
   'appium_documentation_query',
   'appium_skills',
+  // Perception owns screenshot capture — the LLM sees screenshots via the
+  // prompt image part, so exposing this tool just invites redundant calls
+  // (and the tool's own description tells the model to leave returnRawBase64
+  // false, which breaks on remote MCP servers).
+  'appium_screenshot',
 ]);
 
 /** Additional tools to exclude in vision mode — DOM-based tools that distract the agent */

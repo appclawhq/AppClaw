@@ -1426,7 +1426,7 @@
 
         <div class="sidebar-group">
           <button class="sidebar-heading" aria-expanded="false">
-            LambdaTest Cloud
+            Cloud Providers
             <svg
               class="sidebar-chevron"
               viewBox="0 0 24 24"
@@ -1438,7 +1438,10 @@
             </svg>
           </button>
           <ul>
-            <li><a href="#lambdatest">Overview</a></li>
+            <li><a href="#cloud">Overview</a></li>
+            <li><a href="#cloud-testmuai">TestMuAI</a></li>
+            <li><a href="#cloud-custom">Custom / self-hosted</a></li>
+            <li><a href="#cloud-env-vars">Environment variables</a></li>
           </ul>
         </div>
 
@@ -2786,6 +2789,13 @@
               </tr>
             </tbody>
           </table>
+
+          <h3>Cloud Providers</h3>
+          <p>
+            Set <code>CLOUD_PROVIDER=browserstack | saucelabs | lambdatest | custom</code> to route
+            sessions through a remote hub instead of a local device. Full variable reference:
+            <a href="#cloud-env-vars">Cloud Providers → Environment variables</a>.
+          </p>
         </section>
 
         <!-- ============================================ -->
@@ -2918,54 +2928,184 @@
               errors at session creation.
             </li>
             <li>
-              <strong>LambdaTest:</strong> capabilities from this file are merged into the
-              LambdaTest session too, so cloud runs share the same configuration as local.
+              <strong>Cloud runs:</strong> capabilities from this file are merged into the remote
+              session too, including provider-specific namespaces like <code>bstack:options</code>,
+              <code>sauce:options</code>, or <code>lt:options</code>.
             </li>
           </ul>
         </section>
 
         <!-- ============================================ -->
-        <!-- LAMBDATEST                                   -->
+        <!-- CLOUD PROVIDERS                              -->
         <!-- ============================================ -->
 
-        <section id="lambdatest" class="reveal">
-          <h2>LambdaTest Cloud</h2>
+        <section id="cloud" class="reveal">
+          <h2>Cloud Providers</h2>
           <p>
-            Run AppClaw tests on real iOS and Android devices in the cloud — no local device or
-            emulator required. AppClaw integrates with
-            <a href="https://www.lambdatest.com/" target="_blank">LambdaTest</a>'s real device cloud
-            via its Appium-compatible hub.
+            Run AppClaw on real iOS and Android devices in the cloud — no local device or emulator
+            required. AppClaw ships built-in support for
+            <a href="https://www.lambdatest.com/" target="_blank">TestMuAI (formerly LambdaTest)</a>,
+            <a href="https://saucelabs.com/" target="_blank">Sauce Labs</a>, and
+            <a href="https://www.browserstack.com/" target="_blank">BrowserStack</a>, plus a
+            <code>custom</code> mode that points at any Appium-compatible hub (self-hosted grids,
+            device farms, Selenium Grid).
           </p>
 
-          <h3>Setup</h3>
-          <p>Add your LambdaTest credentials and target device to <code>.env</code>:</p>
+          <p>
+            Configuration is generic across providers: pick one via
+            <code>CLOUD_PROVIDER</code>, then supply credentials, target device, and app through the
+            same <code>CLOUD_*</code> variables. Provider-specific dashboard options
+            (<code>bstack:options</code>, <code>sauce:options</code>, <code>lt:options</code>) go
+            through <a href="#custom-capabilities">CAPABILITIES_FILE</a> — AppClaw doesn't wrap
+            them individually.
+          </p>
+
+          <h3>Quick reference</h3>
+          <table class="cmd-table">
+            <thead>
+              <tr>
+                <th>Provider</th>
+                <th>CLOUD_PROVIDER value</th>
+                <th>Default hub</th>
+                <th>Options namespace</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>TestMuAI <span style="color: var(--muted); font-size: 0.9em;">(formerly LambdaTest)</span></td>
+                <td><code>lambdatest</code></td>
+                <td><code>mobile-hub.lambdatest.com/wd/hub</code></td>
+                <td><code>lt:options</code></td>
+              </tr>
+              <tr>
+                <td>Sauce Labs</td>
+                <td><code>saucelabs</code></td>
+                <td><code>ondemand.{CLOUD_REGION}.saucelabs.com/wd/hub</code></td>
+                <td><code>sauce:options</code></td>
+              </tr>
+              <tr>
+                <td>BrowserStack</td>
+                <td><code>browserstack</code></td>
+                <td><code>hub-cloud.browserstack.com/wd/hub</code></td>
+                <td><code>bstack:options</code></td>
+              </tr>
+              <tr>
+                <td>Custom / self-hosted</td>
+                <td><code>custom</code></td>
+                <td>Supplied via <code>CLOUD_SERVER_URL</code></td>
+                <td>Whatever your grid reads</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <h3 id="cloud-testmuai">TestMuAI <span style="color: var(--muted); font-weight: normal; font-size: 0.85em;">(formerly LambdaTest)</span></h3>
+          <p>
+            Example <code>.env</code> for the TestMuAI hub. Sauce Labs and BrowserStack use the same
+            <code>CLOUD_*</code> variables — swap <code>CLOUD_PROVIDER</code> to
+            <code>saucelabs</code> or <code>browserstack</code>, plug in that provider's credentials
+            and app identifier, and add <code>CLOUD_REGION</code> for Sauce if you're not on
+            <code>us-west-1</code>.
+          </p>
 
           <div class="code-block">
             <div class="code-block-header">
               <div class="code-block-dots"><span></span><span></span><span></span></div>
               <span class="code-block-label">.env</span>
             </div>
-            <pre><span class="c"># Enable LambdaTest cloud</span>
+            <pre><span class="c"># Enable TestMuAI (formerly LambdaTest)</span>
 CLOUD_PROVIDER=lambdatest
 
-<span class="c"># LambdaTest credentials (from app.lambdatest.com → Profile → Access Key)</span>
-LAMBDATEST_USERNAME=your_username
-LAMBDATEST_ACCESS_KEY=your_access_key
+<span class="c"># Credentials (app.lambdatest.com → Profile → Access Key)</span>
+CLOUD_USERNAME=your_username
+CLOUD_ACCESS_KEY=your_access_key
 
 <span class="c"># Target device</span>
-LAMBDATEST_DEVICE_NAME=iPhone 14
-LAMBDATEST_OS_VERSION=16
 PLATFORM=ios
+CLOUD_DEVICE_NAME=iPhone 14
+CLOUD_OS_VERSION=16
 
-<span class="c"># Your app (upload via LambdaTest portal, copy the lt:// ID)</span>
-LAMBDATEST_APP=lt://APP10xxxxxxxxxxxxxxxx
+<span class="c"># Your app (upload via portal, copy the lt:// ID)</span>
+CLOUD_APP=lt://APP10xxxxxxxxxxxxxxxx
 
-<span class="c"># LLM for AI-powered automation</span>
-LLM_PROVIDER=gemini
-LLM_API_KEY=your_gemini_api_key</pre>
+<span class="c"># Optional dashboard labels (mapped into lt:options.build/project)</span>
+CLOUD_BUILD_NAME=nightly-1234
+CLOUD_PROJECT_NAME=Checkout Suite</pre>
           </div>
 
-          <h3>CLI Usage</h3>
+          <h3 id="cloud-custom">Custom / self-hosted grid</h3>
+          <p>
+            Use <code>CLOUD_PROVIDER=custom</code> to point at any Appium-compatible hub — a
+            self-hosted Selenium Grid node, an internal device farm, an
+            <a href="https://appium.github.io/appium/" target="_blank">Appium</a> server running on
+            another machine, or a third-party provider not listed above. AppClaw sends W3C caps
+            verbatim; it doesn't inject a provider-specific options namespace.
+          </p>
+
+          <div class="code-block">
+            <div class="code-block-header">
+              <div class="code-block-dots"><span></span><span></span><span></span></div>
+              <span class="code-block-label">.env</span>
+            </div>
+            <pre><span class="c"># Custom grid — you supply the whole hub URL</span>
+CLOUD_PROVIDER=custom
+CLOUD_SERVER_URL=https://appium.example.com/wd/hub
+
+<span class="c"># Auth: either embed in the URL (https://user:key@host/wd/hub) OR set separately</span>
+CLOUD_USERNAME=your_username
+CLOUD_ACCESS_KEY=your_access_key
+
+PLATFORM=android
+CLOUD_DEVICE_NAME=Pixel 8
+CLOUD_OS_VERSION=14
+CLOUD_APP=https://storage.example.com/builds/app.apk</pre>
+          </div>
+
+          <div class="callout callout-tip">
+            <div class="callout-title">Overriding a known provider's hub</div>
+            <p>
+              For BrowserStack / Sauce / LambdaTest you can override the built-in hub URL by
+              setting <code>CLOUD_SERVER_URL</code> — useful for private endpoints, regional
+              overrides, or Sauce datacenters not covered by <code>CLOUD_REGION</code>. Credentials
+              are still injected from <code>CLOUD_USERNAME</code> and <code>CLOUD_ACCESS_KEY</code>
+              unless the URL already carries basic auth.
+            </p>
+          </div>
+
+          <h3>Provider-specific options (bstack / sauce / lt)</h3>
+          <p>
+            AppClaw maps <code>CLOUD_BUILD_NAME</code> and <code>CLOUD_PROJECT_NAME</code> into the
+            active provider's options namespace as a convenience (for BrowserStack it aliases both
+            <code>buildName</code>/<code>projectName</code> and <code>build</code>/<code>project</code>).
+            Everything else — video recording, network logs, tunneling, geo-location, project
+            capacity — goes through a <a href="#custom-capabilities">capabilities file</a>:
+          </p>
+
+          <div class="code-block">
+            <div class="code-block-header">
+              <div class="code-block-dots"><span></span><span></span><span></span></div>
+              <span class="code-block-label">caps.json</span>
+            </div>
+            <pre>{
+  <span class="s">"lt:options"</span>: {
+    <span class="s">"video"</span>: true,
+    <span class="s">"network"</span>: true,
+    <span class="s">"deviceOrientation"</span>: <span class="s">"PORTRAIT"</span>,
+    <span class="s">"idleTimeout"</span>: 300
+  }
+}</pre>
+          </div>
+
+          <p>Load it via CLI or SDK the same way you do for local runs:</p>
+
+          <div class="code-block">
+            <div class="code-block-header">
+              <div class="code-block-dots"><span></span><span></span><span></span></div>
+              <span class="code-block-label">Terminal</span>
+            </div>
+            <pre>appclaw --caps ./caps.json --flow flows/checkout.yaml</pre>
+          </div>
+
+          <h3>CLI usage</h3>
           <p>Once <code>.env</code> is configured, run AppClaw exactly as you would locally:</p>
 
           <div class="code-block">
@@ -2980,10 +3120,10 @@ appclaw "Open the app and navigate to the checkout screen"
 appclaw --flow flows/checkout.yaml</pre>
           </div>
 
-          <h3>SDK Usage</h3>
+          <h3>SDK usage</h3>
           <p>
-            No SDK changes needed — when <code>CLOUD_PROVIDER=lambdatest</code> is set in
-            <code>.env</code>, the SDK automatically routes the session through LambdaTest:
+            No SDK changes needed — the same <code>AppClaw</code> instance routes through the
+            configured cloud provider automatically:
           </p>
 
           <div class="code-block">
@@ -2993,11 +3133,11 @@ appclaw --flow flows/checkout.yaml</pre>
             </div>
             <pre><span class="k">import</span> <span class="p">{</span> AppClaw <span class="p">}</span> <span class="k">from</span> <span class="s">'appclaw'</span><span class="p">;</span>
 
-<span class="c">// CLOUD_PROVIDER=lambdatest is read from .env automatically</span>
+<span class="c">// CLOUD_PROVIDER is read from .env automatically</span>
 <span class="k">const</span> app <span class="p">=</span> <span class="k">new</span> AppClaw<span class="p">({</span>
   provider<span class="p">:</span>    <span class="s">'gemini'</span><span class="p">,</span>
   apiKey<span class="p">:</span>      process<span class="p">.</span>env<span class="p">.</span>LLM_API_KEY<span class="p">,</span>
-  reportName<span class="p">:</span>  <span class="s">'Checkout — LambdaTest'</span><span class="p">,</span>
+  reportName<span class="p">:</span>  <span class="s">'Checkout — Cloud'</span><span class="p">,</span>
 <span class="p">});</span>
 
 <span class="k">await</span> app<span class="p">.</span>run<span class="p">(</span><span class="s">'open the app'</span><span class="p">);</span>
@@ -3007,7 +3147,7 @@ appclaw --flow flows/checkout.yaml</pre>
 <span class="k">await</span> app<span class="p">.</span>teardown<span class="p">();</span>  <span class="c">// report saved to .appclaw/runs/</span></pre>
           </div>
 
-          <h3>Environment Variables</h3>
+          <h3 id="cloud-env-vars">Environment variables</h3>
           <table class="cmd-table">
             <thead>
               <tr>
@@ -3020,62 +3160,87 @@ appclaw --flow flows/checkout.yaml</pre>
               <tr>
                 <td>CLOUD_PROVIDER</td>
                 <td>Yes</td>
-                <td>Set to <code>lambdatest</code> to enable cloud execution</td>
+                <td>
+                  <code>browserstack</code>, <code>saucelabs</code>, <code>lambdatest</code>, or
+                  <code>custom</code>. Empty (default) = local execution.
+                </td>
               </tr>
               <tr>
-                <td>LAMBDATEST_USERNAME</td>
+                <td>CLOUD_USERNAME</td>
+                <td>Yes<sup>1</sup></td>
+                <td>Cloud account username / user ID.</td>
+              </tr>
+              <tr>
+                <td>CLOUD_ACCESS_KEY</td>
+                <td>Yes<sup>1</sup></td>
+                <td>Cloud access key / token from the provider dashboard.</td>
+              </tr>
+              <tr>
+                <td>CLOUD_DEVICE_NAME</td>
                 <td>Yes</td>
-                <td>Your LambdaTest account username</td>
+                <td>
+                  Cloud device to target, e.g. <code>iPhone 15 Pro</code> or
+                  <code>Samsung Galaxy S24</code>. Sent as <code>appium:deviceName</code>.
+                </td>
               </tr>
               <tr>
-                <td>LAMBDATEST_ACCESS_KEY</td>
+                <td>CLOUD_OS_VERSION</td>
                 <td>Yes</td>
-                <td>Your LambdaTest access key (from Profile → Access Key)</td>
+                <td>
+                  OS version, e.g. <code>17</code> (iOS) or <code>14</code> (Android). Sent as
+                  <code>appium:platformVersion</code>.
+                </td>
               </tr>
               <tr>
-                <td>LAMBDATEST_DEVICE_NAME</td>
-                <td>Yes</td>
-                <td>Cloud device to use, e.g. <code>iPhone 14</code>, <code>Galaxy S23</code></td>
-              </tr>
-              <tr>
-                <td>LAMBDATEST_OS_VERSION</td>
-                <td>Yes</td>
-                <td>OS version, e.g. <code>16</code> (iOS) or <code>13</code> (Android)</td>
-              </tr>
-              <tr>
-                <td>LAMBDATEST_APP</td>
+                <td>CLOUD_APP</td>
                 <td>No</td>
-                <td>App ID from the LambdaTest portal (format: <code>lt://APP…</code>)</td>
+                <td>
+                  App identifier — <code>bs://…</code> (BrowserStack), <code>storage:filename=…</code>
+                  or <code>https://…</code> (Sauce), <code>lt://APP…</code> (LambdaTest), or any URL
+                  the custom grid understands. Sent as <code>appium:app</code>.
+                </td>
               </tr>
               <tr>
-                <td>LAMBDATEST_BUILD_NAME</td>
-                <td>No</td>
-                <td>Build label shown in the LambdaTest dashboard</td>
+                <td>CLOUD_SERVER_URL</td>
+                <td>Yes<sup>2</sup></td>
+                <td>
+                  Full Appium hub URL, e.g. <code>https://appium.example.com/wd/hub</code>. Required
+                  for <code>custom</code>; optional for known providers (overrides the built-in
+                  hub).
+                </td>
               </tr>
               <tr>
-                <td>LAMBDATEST_PROJECT_NAME</td>
+                <td>CLOUD_REGION</td>
                 <td>No</td>
-                <td>Project label shown in the LambdaTest dashboard</td>
+                <td>
+                  Sauce Labs datacenter region for the built-in hub URL. Default:
+                  <code>us-west-1</code>. Ignored by other providers.
+                </td>
               </tr>
               <tr>
-                <td>LAMBDATEST_VIDEO</td>
+                <td>CLOUD_BUILD_NAME</td>
                 <td>No</td>
-                <td>Record session video. Default: <code>true</code></td>
+                <td>Build label shown in the provider dashboard.</td>
               </tr>
               <tr>
-                <td>LAMBDATEST_NETWORK</td>
+                <td>CLOUD_PROJECT_NAME</td>
                 <td>No</td>
-                <td>Capture network logs. Default: <code>false</code></td>
+                <td>Project label shown in the provider dashboard.</td>
               </tr>
             </tbody>
           </table>
+          <p style="font-size: 0.9em; margin-top: 0.5em;">
+            <sup>1</sup> Not strictly required for <code>custom</code> when the credentials are
+            embedded in <code>CLOUD_SERVER_URL</code> (<code>https://user:key@host/wd/hub</code>).<br />
+            <sup>2</sup> Required for <code>CLOUD_PROVIDER=custom</code>; optional otherwise.
+          </p>
 
           <div class="callout callout-tip">
             <div class="callout-title">No code changes required</div>
             <p>
               Switching between local and cloud execution is purely config — set
-              <code>CLOUD_PROVIDER=lambdatest</code> in your CI environment and remove it for local
-              runs. Your YAML flows and SDK tests stay identical.
+              <code>CLOUD_PROVIDER</code> in your CI environment and unset it (or leave it empty)
+              for local runs. Your YAML flows and SDK tests stay identical.
             </p>
           </div>
         </section>

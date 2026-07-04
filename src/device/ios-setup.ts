@@ -11,11 +11,24 @@ import type { MCPClient } from '../mcp/types.js';
 import { extractText } from '../mcp/tools.js';
 import * as ui from '../ui/terminal.js';
 
+export interface SimulatorSetupResult {
+  /**
+   * Capabilities the caller MUST merge into appium_session_management create.
+   *
+   * Includes `appium:webDriverAgentUrl` pointing at the WDA that
+   * prepare_ios_simulator already installed and launched on a per-simulator
+   * port. Without this, XCUITestDriver ignores the running WDA, allocates a
+   * new wdaLocalPort, and tries to build+launch WDA via xcodebuild — which
+   * frequently fails (xcodebuild exit 65) and always races the prepared WDA.
+   */
+  capabilitiesHint: Record<string, unknown>;
+}
+
 /**
  * Full simulator setup: boot + WDA download + WDA install.
  * Uses the prepare_ios_simulator tool which handles all three steps in one call.
  */
-export async function setupSimulator(mcp: MCPClient, udid: string): Promise<void> {
+export async function setupSimulator(mcp: MCPClient, udid: string): Promise<SimulatorSetupResult> {
   ui.startSpinner('Preparing iOS simulator...');
   let result: any;
   try {
@@ -36,7 +49,7 @@ export async function setupSimulator(mcp: MCPClient, udid: string): Promise<void
 
   if (!result) {
     ui.printSetupOk('iOS simulator prepared');
-    return;
+    return { capabilitiesHint: {} };
   }
 
   // Boot step
@@ -77,6 +90,12 @@ export async function setupSimulator(mcp: MCPClient, udid: string): Promise<void
   } else if (result.wda_install?.status === 'skipped') {
     ui.printSetupOk('WebDriverAgent already installed');
   }
+
+  const hint =
+    result.capabilitiesHint && typeof result.capabilitiesHint === 'object'
+      ? (result.capabilitiesHint as Record<string, unknown>)
+      : {};
+  return { capabilitiesHint: hint };
 }
 
 /**

@@ -96,7 +96,8 @@ function injectAuth(rawUrl: string, config: AppClawConfig): string {
       `Invalid cloud hub URL "${rawUrl}". Provide a full http(s) URL, e.g. https://hub.example.com/wd/hub`
     );
   }
-  if (!url.username && config.CLOUD_USERNAME) url.username = encodeURIComponent(config.CLOUD_USERNAME);
+  if (!url.username && config.CLOUD_USERNAME)
+    url.username = encodeURIComponent(config.CLOUD_USERNAME);
   if (!url.password && config.CLOUD_ACCESS_KEY)
     url.password = encodeURIComponent(config.CLOUD_ACCESS_KEY);
   return url.toString();

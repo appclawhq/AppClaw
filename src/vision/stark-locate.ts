@@ -10,7 +10,7 @@
 import starkVision from 'df-vision';
 import sharp from 'sharp';
 
-import type { MCPClient, MCPToolResult } from '../mcp/types.js';
+import type { MCPClient } from '../mcp/types.js';
 
 const {
   StarkVisionClient,
@@ -55,33 +55,11 @@ async function downscaleForVision(base64: string): Promise<string> {
   }
 }
 
-function textFromMcpResult(result: MCPToolResult): string {
-  for (const content of result.content) {
-    if (content.type === 'text') return content.text;
-  }
-  return '';
-}
-
 /** Same behavior as mcp/tools.screenshot — kept local to avoid circular imports. */
 async function captureScreenshotBase64(mcp: MCPClient): Promise<string | null> {
-  const result = await mcp.callTool('appium_screenshot', {});
+  const result = await mcp.callTool('appium_screenshot', { returnRawBase64: true });
   for (const content of result.content) {
     if (content.type === 'image') return content.data;
-  }
-  const text = textFromMcpResult(result);
-  if (text.startsWith('iVBOR') || text.startsWith('/9j/')) {
-    return text;
-  }
-  if (text.includes('screenshot') && text.includes('/')) {
-    try {
-      const pathMatch = text.match(/:\s*(.+\.png)/);
-      if (pathMatch) {
-        const { readFileSync } = await import('fs');
-        return readFileSync(pathMatch[1]).toString('base64');
-      }
-    } catch {
-      /* ignore */
-    }
   }
   return null;
 }

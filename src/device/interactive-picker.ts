@@ -10,6 +10,7 @@
 
 import readline from 'node:readline';
 import { Writable } from 'node:stream';
+import boxen from 'boxen';
 
 export interface PickerItem<T> {
   label: string;
@@ -64,8 +65,7 @@ export async function interactivePicker<T>(
     readline.emitKeypressEvents(process.stdin);
 
     const formatItem = (item: PickerItem<T>, selected: boolean): string => {
-      const arrow = selected ? '\x1B[36m>\x1B[0m ' : '  ';
-      const prefix = `  ${arrow}`;
+      const prefix = selected ? '\x1B[36m>\x1B[0m ' : '  ';
 
       let line = '';
       if (selected) {
@@ -107,52 +107,59 @@ export async function interactivePicker<T>(
       // Clear everything from cursor to end of screen
       process.stdout.write('\x1B[J');
 
-      let lineCount = 0;
+      // Build the inner content of the boxed frame.
+      const lines: string[] = [];
 
-      // Prompt line with inline search
+      // Search hint line inside the box.
       if (searchable && searchQuery) {
-        console.log(`  ? ${prompt} \x1B[33m${searchQuery}\x1B[90m|\x1B[0m`);
+        lines.push(`\x1B[33m${searchQuery}\x1B[90m|\x1B[0m`);
       } else if (searchable) {
-        console.log(`  ? ${prompt} \x1B[90m(type to filter)\x1B[0m`);
-      } else {
-        console.log(`  ? ${prompt}`);
+        lines.push(`\x1B[90m(type to filter)\x1B[0m`);
       }
-      lineCount++;
 
-      // Empty state
       if (filteredItems.length === 0) {
-        console.log(`    \x1B[90mNo matches found\x1B[0m`);
-        lineCount++;
-        lastRenderedLineCount = lineCount;
-        return;
+        lines.push(`\x1B[90mNo matches found\x1B[0m`);
+      } else {
+        // Adjust scroll to keep selection visible
+        const visibleCount = Math.min(maxVisible, filteredItems.length);
+        if (selectedIndex < scrollOffset) {
+          scrollOffset = selectedIndex;
+        } else if (selectedIndex >= scrollOffset + visibleCount) {
+          scrollOffset = selectedIndex - visibleCount + 1;
+        }
+
+        for (
+          let i = scrollOffset;
+          i < scrollOffset + visibleCount && i < filteredItems.length;
+          i++
+        ) {
+          lines.push(formatItem(filteredItems[i], i === selectedIndex));
+        }
+
+        if (filteredItems.length > maxVisible) {
+          const below = filteredItems.length - scrollOffset - visibleCount;
+          const above = scrollOffset;
+          const parts: string[] = [];
+          if (above > 0) parts.push(`${above} more above`);
+          if (below > 0) parts.push(`${below} more below`);
+          lines.push(`\x1B[90m${parts.join(' · ')}\x1B[0m`);
+        }
       }
 
-      // Adjust scroll to keep selection visible
-      const visibleCount = Math.min(maxVisible, filteredItems.length);
-      if (selectedIndex < scrollOffset) {
-        scrollOffset = selectedIndex;
-      } else if (selectedIndex >= scrollOffset + visibleCount) {
-        scrollOffset = selectedIndex - visibleCount + 1;
-      }
+      const boxed = boxen(lines.join('\n'), {
+        title: prompt,
+        titleAlignment: 'left',
+        padding: { top: 0, bottom: 0, left: 1, right: 1 },
+        margin: { left: 2, right: 0, top: 0, bottom: 0 },
+        borderStyle: 'round',
+        borderColor: '#FC8EAC',
+      });
 
-      // Render visible items
-      for (let i = scrollOffset; i < scrollOffset + visibleCount && i < filteredItems.length; i++) {
-        console.log(formatItem(filteredItems[i], i === selectedIndex));
-        lineCount++;
-      }
-
-      // Scroll indicator (only when list is truncated)
-      if (filteredItems.length > maxVisible) {
-        const below = filteredItems.length - scrollOffset - visibleCount;
-        const above = scrollOffset;
-        const parts: string[] = [];
-        if (above > 0) parts.push(`${above} more above`);
-        if (below > 0) parts.push(`${below} more below`);
-        console.log(`    \x1B[90m${parts.join(' · ')}\x1B[0m`);
-        lineCount++;
-      }
-
-      lastRenderedLineCount = lineCount;
+      process.stdout.write(`${boxed}\n`);
+      // Track how many terminal lines we just drew so the next render can
+      // rewind and overwrite them cleanly. boxed has N-1 internal newlines and
+      // the trailing `\n` we added advances the cursor a total of N lines.
+      lastRenderedLineCount = boxed.split('\n').length;
     };
 
     // Initial render

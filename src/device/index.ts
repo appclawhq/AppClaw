@@ -113,19 +113,32 @@ export async function setupDevice(
   );
 
   // Step 3: iOS-specific setup
+  let simulatorHint: Record<string, unknown> = {};
   if (platform === 'ios' && deviceType === 'simulator') {
-    await setupSimulator(mcp, selection.device.udid);
+    const setup = await setupSimulator(mcp, selection.device.udid);
+    simulatorHint = setup.capabilitiesHint;
   } else if (platform === 'ios' && deviceType === 'real') {
     await checkRealDeviceWDA();
   }
 
   // Step 4: Create session
+  // Merge the WDA capabilities hint from prepare_ios_simulator into extraCaps.
+  // Precedence: hint < caller extraCaps (caller can still override).
+  // When the hint provides `appium:webDriverAgentUrl`, drop any conflicting
+  // `appium:wdaLocalPort` — the two are mutually exclusive per XCUITestDriver's
+  // contract (webDriverAgentUrl reuses a running WDA; wdaLocalPort tells it to
+  // launch a new one). Passing both makes XCUITest ignore the running WDA and
+  // fail on xcodebuild.
+  const mergedExtraCaps: Record<string, unknown> = { ...simulatorHint, ...args.extraCaps };
+  if (mergedExtraCaps['appium:webDriverAgentUrl']) {
+    delete mergedExtraCaps['appium:wdaLocalPort'];
+  }
   const session = await createPlatformSession(
     mcp,
     args.config,
     platform,
     deviceType,
-    args.extraCaps
+    mergedExtraCaps
   );
 
   return {

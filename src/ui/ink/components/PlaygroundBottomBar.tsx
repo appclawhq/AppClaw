@@ -45,6 +45,11 @@ export function PlaygroundBottomBar({
         <Sep />
         <Text color={COLORS.label}>mode</Text>
         <Text color={COLORS.dimmed}>{mode}</Text>
+        <Sep />
+        <Text color={COLORS.label}>mcp</Text>
+        <Text color={transport === 'sse' ? COLORS.yellow : COLORS.green}>
+          {transport === 'sse' ? 'remote' : 'local'}
+        </Text>
         {app ? (
           <>
             <Sep />

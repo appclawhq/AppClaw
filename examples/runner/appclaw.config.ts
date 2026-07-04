@@ -6,7 +6,7 @@ export default defineConfig({
   concurrency: 'auto',
   retries: 1,
   node: {
-    url: "https://57c0-49-206-52-37.ngrok-free.app/sse"
+    url: 'https://57c0-49-206-52-37.ngrok-free.app/sse',
   }, // spawn a local appium-mcp SSE server url: 'http://localhost:8080'
 
   // ── AppClaw options (forwarded to every test's session) ──

@@ -15,6 +15,7 @@ import type { Platform, DeviceType } from '../index.js';
 import { extractText } from '../mcp/tools.js';
 import { interactivePicker } from './interactive-picker.js';
 import type { PickerItem } from './interactive-picker.js';
+import { listIOSSimulators } from './ios-simulators.js';
 import * as ui from '../ui/terminal.js';
 
 export interface DeviceInfo {
@@ -54,36 +55,68 @@ export async function discoverAndSelectDevice(
     return { device: { name: udid, udid }, platform, deviceType };
   }
 
-  // Step 1: Call select_device to discover available devices
+  // Step 1: Discover available devices.
+  // For iOS simulators, ask simctl directly — appium-mcp's `select_device`
+  // response omits the iOS runtime version and text-parses inconsistently for
+  // unnamed sims. For everything else, use the MCP tool as before.
   ui.startSpinner(`Discovering ${platform} devices...`);
 
-  const selectPlatformArgs: Record<string, unknown> = { platform };
-  if (platform === 'ios' && deviceType) {
-    selectPlatformArgs.iosDeviceType = deviceType;
+  let devices: DeviceInfo[];
+  if (platform === 'ios' && deviceType === 'simulator') {
+    try {
+      const sims = await listIOSSimulators();
+      devices = sims.map((s) => ({
+        name: s.name,
+        udid: s.udid,
+        state: s.state,
+        platform: s.iosVersion,
+      }));
+    } catch (err: any) {
+      ui.stopSpinner();
+      ui.printSetupError(
+        `Failed to list iOS simulators: ${err?.message ?? err}`,
+        'Check that Xcode is installed and run: xcrun simctl list devices'
+      );
+      process.exit(1);
+    }
+    ui.stopSpinner();
+
+    if (devices.length === 0) {
+      ui.printSetupError(
+        'No iOS simulators found.',
+        'Open Simulator.app or run: xcrun simctl list devices'
+      );
+      process.exit(1);
+    }
+  } else {
+    const selectPlatformArgs: Record<string, unknown> = { platform };
+    if (platform === 'ios' && deviceType) {
+      selectPlatformArgs.iosDeviceType = deviceType;
+    }
+
+    const platformResult = await mcp.callTool('select_device', selectPlatformArgs);
+    const platformText = extractText(platformResult);
+    ui.stopSpinner();
+
+    // Check for errors
+    if (
+      platformText.toLowerCase().includes('no devices') ||
+      platformText.toLowerCase().includes('no simulators') ||
+      platformText.toLowerCase().includes('no ios devices')
+    ) {
+      const hint =
+        platform === 'android'
+          ? 'Connect a device/emulator: adb devices'
+          : deviceType === 'simulator'
+            ? 'Open Simulator.app or run: xcrun simctl list devices'
+            : 'Connect an iOS device via USB and trust this computer';
+      ui.printSetupError(`No ${platform} ${deviceType ?? ''} devices found.`, hint);
+      process.exit(1);
+    }
+
+    // Step 2: Parse device list from response
+    devices = parseDeviceList(platformText, platform);
   }
-
-  const platformResult = await mcp.callTool('select_device', selectPlatformArgs);
-  const platformText = extractText(platformResult);
-  ui.stopSpinner();
-
-  // Check for errors
-  if (
-    platformText.toLowerCase().includes('no devices') ||
-    platformText.toLowerCase().includes('no simulators') ||
-    platformText.toLowerCase().includes('no ios devices')
-  ) {
-    const hint =
-      platform === 'android'
-        ? 'Connect a device/emulator: adb devices'
-        : deviceType === 'simulator'
-          ? 'Open Simulator.app or run: xcrun simctl list devices'
-          : 'Connect an iOS device via USB and trust this computer';
-    ui.printSetupError(`No ${platform} ${deviceType ?? ''} devices found.`, hint);
-    process.exit(1);
-  }
-
-  // Step 2: Parse device list from response
-  let devices = parseDeviceList(platformText, platform);
 
   // Clean up the list: remove junk, deduplicate, sort
   devices = cleanAndSortDevices(devices);
@@ -303,24 +336,39 @@ export function parseDeviceList(text: string, _platform: Platform): DeviceInfo[]
 
 /** Interactive device picker using the shared searchable picker */
 async function promptDevicePicker(devices: DeviceInfo[]): Promise<DeviceInfo> {
+  // When every device has a parsed iOS version, render an aligned table:
+  //   iPhone 16 Pro Max          iOS 18.2   206754D6…
+  // Otherwise fall back to plain name + optional hint.
+  const allHaveIOSVersion = devices.every((d) => !!d.platform);
+  const nameWidth = allHaveIOSVersion
+    ? Math.min(32, Math.max(...devices.map((d) => d.name.length)))
+    : 0;
+  const versionWidth = allHaveIOSVersion
+    ? Math.max(...devices.map((d) => (d.platform ?? '').length))
+    : 0;
+
   const items: PickerItem<DeviceInfo>[] = devices.map((d) => {
     const tag = d.state?.toLowerCase() === 'booted' ? 'Booted' : undefined;
-    const hint =
-      d.state?.toLowerCase() !== 'booted' && d.platform
-        ? `iOS ${d.platform}`
-        : d.platform
-          ? `iOS ${d.platform}`
-          : undefined;
+
+    if (allHaveIOSVersion) {
+      const paddedName = d.name.padEnd(nameWidth).slice(0, nameWidth);
+      const paddedVersion = (d.platform ?? '').padEnd(versionWidth);
+      const shortUdid = d.udid.length > 8 ? `${d.udid.slice(0, 8)}…` : d.udid;
+      return {
+        label: `${paddedName}  iOS ${paddedVersion}  ${shortUdid}`,
+        value: d,
+        tag,
+      };
+    }
 
     return {
       label: d.name,
       value: d,
       tag,
-      hint,
+      hint: d.platform ? `iOS ${d.platform}` : undefined,
     };
   });
 
-  // Start selection on first booted device (if any)
   return interactivePicker(items, {
     prompt: 'Select device:',
     viewportSize: 12,

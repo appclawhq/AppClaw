@@ -69,25 +69,11 @@ export async function getPageSource(client: MCPClient): Promise<string> {
 /** Take a screenshot and return base64 image data, or null if unavailable */
 export async function screenshot(client: MCPClient, elementUUID?: string): Promise<string | null> {
   const result = await client.callTool('appium_screenshot', {
+    returnRawBase64: true,
     ...(elementUUID && { elementUUID }),
   });
   for (const content of result.content) {
     if (content.type === 'image') return content.data;
-  }
-  const text = extractText(result);
-  if (text.startsWith('iVBOR') || text.startsWith('/9j/')) {
-    return text;
-  }
-  if (text.includes('screenshot') && text.includes('/')) {
-    try {
-      const pathMatch = text.match(/:\s*(.+\.png)/);
-      if (pathMatch) {
-        const { readFileSync } = await import('fs');
-        return readFileSync(pathMatch[1]).toString('base64');
-      }
-    } catch {
-      // File read failed
-    }
   }
   return null;
 }
