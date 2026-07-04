@@ -11,7 +11,7 @@
     "test:ci": "appclaw test --env-file ../../.env --workers 2 --retries 1 --shard 1/1"
   },
   "devDependencies": {
-    "appclaw": "^1.8.0",
+    "appclaw": "^1.9.1",
     "tsx": "^4.21.0"
   }
 }

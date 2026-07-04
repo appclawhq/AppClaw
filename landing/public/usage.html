@@ -2944,8 +2944,8 @@
           <p>
             Run AppClaw on real iOS and Android devices in the cloud — no local device or emulator
             required. AppClaw ships built-in support for
-            <a href="https://www.lambdatest.com/" target="_blank">TestMuAI (formerly LambdaTest)</a>,
-            <a href="https://saucelabs.com/" target="_blank">Sauce Labs</a>, and
+            <a href="https://www.lambdatest.com/" target="_blank">TestMuAI (formerly LambdaTest)</a
+            >, <a href="https://saucelabs.com/" target="_blank">Sauce Labs</a>, and
             <a href="https://www.browserstack.com/" target="_blank">BrowserStack</a>, plus a
             <code>custom</code> mode that points at any Appium-compatible hub (self-hosted grids,
             device farms, Selenium Grid).
@@ -2956,8 +2956,8 @@
             <code>CLOUD_PROVIDER</code>, then supply credentials, target device, and app through the
             same <code>CLOUD_*</code> variables. Provider-specific dashboard options
             (<code>bstack:options</code>, <code>sauce:options</code>, <code>lt:options</code>) go
-            through <a href="#custom-capabilities">CAPABILITIES_FILE</a> — AppClaw doesn't wrap
-            them individually.
+            through <a href="#custom-capabilities">CAPABILITIES_FILE</a> — AppClaw doesn't wrap them
+            individually.
           </p>
 
           <h3>Quick reference</h3>
@@ -2972,7 +2972,10 @@
             </thead>
             <tbody>
               <tr>
-                <td>TestMuAI <span style="color: var(--muted); font-size: 0.9em;">(formerly LambdaTest)</span></td>
+                <td>
+                  TestMuAI
+                  <span style="color: var(--muted); font-size: 0.9em">(formerly LambdaTest)</span>
+                </td>
                 <td><code>lambdatest</code></td>
                 <td><code>mobile-hub.lambdatest.com/wd/hub</code></td>
                 <td><code>lt:options</code></td>
@@ -2998,7 +3001,12 @@
             </tbody>
           </table>
 
-          <h3 id="cloud-testmuai">TestMuAI <span style="color: var(--muted); font-weight: normal; font-size: 0.85em;">(formerly LambdaTest)</span></h3>
+          <h3 id="cloud-testmuai">
+            TestMuAI
+            <span style="color: var(--muted); font-weight: normal; font-size: 0.85em"
+              >(formerly LambdaTest)</span
+            >
+          </h3>
           <p>
             Example <code>.env</code> for the TestMuAI hub. Sauce Labs and BrowserStack use the same
             <code>CLOUD_*</code> variables — swap <code>CLOUD_PROVIDER</code> to
@@ -3063,10 +3071,10 @@ CLOUD_APP=https://storage.example.com/builds/app.apk</pre>
           <div class="callout callout-tip">
             <div class="callout-title">Overriding a known provider's hub</div>
             <p>
-              For BrowserStack / Sauce / LambdaTest you can override the built-in hub URL by
-              setting <code>CLOUD_SERVER_URL</code> — useful for private endpoints, regional
-              overrides, or Sauce datacenters not covered by <code>CLOUD_REGION</code>. Credentials
-              are still injected from <code>CLOUD_USERNAME</code> and <code>CLOUD_ACCESS_KEY</code>
+              For BrowserStack / Sauce / LambdaTest you can override the built-in hub URL by setting
+              <code>CLOUD_SERVER_URL</code> — useful for private endpoints, regional overrides, or
+              Sauce datacenters not covered by <code>CLOUD_REGION</code>. Credentials are still
+              injected from <code>CLOUD_USERNAME</code> and <code>CLOUD_ACCESS_KEY</code>
               unless the URL already carries basic auth.
             </p>
           </div>
@@ -3075,9 +3083,10 @@ CLOUD_APP=https://storage.example.com/builds/app.apk</pre>
           <p>
             AppClaw maps <code>CLOUD_BUILD_NAME</code> and <code>CLOUD_PROJECT_NAME</code> into the
             active provider's options namespace as a convenience (for BrowserStack it aliases both
-            <code>buildName</code>/<code>projectName</code> and <code>build</code>/<code>project</code>).
-            Everything else — video recording, network logs, tunneling, geo-location, project
-            capacity — goes through a <a href="#custom-capabilities">capabilities file</a>:
+            <code>buildName</code>/<code>projectName</code> and
+            <code>build</code>/<code>project</code>). Everything else — video recording, network
+            logs, tunneling, geo-location, project capacity — goes through a
+            <a href="#custom-capabilities">capabilities file</a>:
           </p>
 
           <div class="code-block">
@@ -3195,9 +3204,10 @@ appclaw --flow flows/checkout.yaml</pre>
                 <td>CLOUD_APP</td>
                 <td>No</td>
                 <td>
-                  App identifier — <code>bs://…</code> (BrowserStack), <code>storage:filename=…</code>
-                  or <code>https://…</code> (Sauce), <code>lt://APP…</code> (LambdaTest), or any URL
-                  the custom grid understands. Sent as <code>appium:app</code>.
+                  App identifier — <code>bs://…</code> (BrowserStack),
+                  <code>storage:filename=…</code> or <code>https://…</code> (Sauce),
+                  <code>lt://APP…</code> (LambdaTest), or any URL the custom grid understands. Sent
+                  as <code>appium:app</code>.
                 </td>
               </tr>
               <tr>
@@ -3229,9 +3239,10 @@ appclaw --flow flows/checkout.yaml</pre>
               </tr>
             </tbody>
           </table>
-          <p style="font-size: 0.9em; margin-top: 0.5em;">
+          <p style="font-size: 0.9em; margin-top: 0.5em">
             <sup>1</sup> Not strictly required for <code>custom</code> when the credentials are
-            embedded in <code>CLOUD_SERVER_URL</code> (<code>https://user:key@host/wd/hub</code>).<br />
+            embedded in
+            <code>CLOUD_SERVER_URL</code> (<code>https://user:key@host/wd/hub</code>).<br />
             <sup>2</sup> Required for <code>CLOUD_PROVIDER=custom</code>; optional otherwise.
           </p>
 
