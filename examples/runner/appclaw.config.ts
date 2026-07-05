@@ -22,14 +22,12 @@ function cloudOptionsCaps(): Record<string, unknown> {
         'lt:options': {
           w3c: true,
           isRealMobile: true,
-          deviceName: 'Samsung Galaxy S24',
-          platformVersion: '14',
+          deviceName: 'Pixel 4a',
+          platformVersion: '12',
           app: 'lt://APP10160431111775634745871487',
           build,
           project,
-          name: 'AppClaw Runner',
-          video: true,
-          network: false,
+          name: 'AppClaw Runner'
         },
       };
     case 'browserstack':
