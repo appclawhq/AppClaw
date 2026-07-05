@@ -109,6 +109,12 @@ function fontLinks(): string {
   <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,500;0,600;0,700;1,500;1,600&family=Sora:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">`;
 }
 
+/* ─── Anime.js CDN ───────────────────────────────────────── */
+
+function animeScript(): string {
+  return `<script src="https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.2/anime.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"><\/script>`;
+}
+
 /* ─── Theme Script ───────────────────────────────────────── */
 
 function themeScript(): string {
@@ -239,7 +245,7 @@ function sharedCss(): string {
     }
 
     .page {
-      max-width: 1320px;
+      max-width: 1600px;
       margin: 0 auto;
       padding: 32px 32px 64px;
     }
@@ -247,22 +253,8 @@ function sharedCss(): string {
     a { color: var(--accent); text-decoration: none; transition: opacity 0.15s; }
     a:hover { opacity: 0.8; }
 
-    /* ── Animations ── */
-    @keyframes fadeInUp {
-      from { opacity: 0; transform: translateY(10px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-    @keyframes fadeIn {
-      from { opacity: 0; }
-      to { opacity: 1; }
-    }
-
-    .animate-in { animation: fadeInUp 0.35s ease-out both; }
-    .animate-in-1 { animation-delay: 0.04s; }
-    .animate-in-2 { animation-delay: 0.08s; }
-    .animate-in-3 { animation-delay: 0.12s; }
-    .animate-in-4 { animation-delay: 0.16s; }
-    .animate-in-5 { animation-delay: 0.2s; }
+    /* ── Animations (controlled by anime.js; opacity:0 is the initial hidden state) ── */
+    .animate-in { opacity: 0; transform: translateY(10px); }
 
     /* ── Status Pill ── */
     .status-pill {
@@ -352,6 +344,7 @@ function sharedCss(): string {
         animation-duration: 0.01ms !important;
         transition-duration: 0.01ms !important;
       }
+      .animate-in { opacity: 1 !important; transform: none !important; }
     }
   `;
 }
@@ -416,6 +409,157 @@ function healthSummary(runs: RunIndexEntry[]): { headline: string; sub: string; 
 
 /* ─── Run Index Page ─────────────────────────────────────── */
 
+/* Analytics helpers */
+
+interface DayStats {
+  date: string;
+  label: string;
+  passed: number;
+  failed: number;
+}
+
+function computeTrendData(runs: RunIndexEntry[], days = 14): DayStats[] {
+  const now = new Date();
+  const result: DayStats[] = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date(now);
+    d.setDate(d.getDate() - i);
+    const dateStr = d.toISOString().slice(0, 10);
+    const label = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    const dayRuns = runs.filter((r) => r.startedAt.slice(0, 10) === dateStr);
+    result.push({
+      date: dateStr,
+      label,
+      passed: dayRuns.filter((r) => r.success).length,
+      failed: dayRuns.filter((r) => !r.success).length,
+    });
+  }
+  return result;
+}
+
+function renderSparklineSvg(trend: DayStats[], w = 220, h = 52): string {
+  const n = trend.length;
+  if (n < 2) return `<svg width="${w}" height="${h}"></svg>`;
+  const totals = trend.map((d) => d.passed + d.failed);
+  const maxTotal = Math.max(1, ...totals);
+  const xStep = w / (n - 1);
+  const pad = 3;
+
+  const polyPoints = (getter: (d: DayStats) => number, color: string): string => {
+    const pts = trend
+      .map((d, i) => {
+        const x = (i * xStep).toFixed(1);
+        const y = (h - pad - (getter(d) / maxTotal) * (h - pad * 2)).toFixed(1);
+        return `${x},${y}`;
+      })
+      .join(' ');
+    return `<polyline points="${pts}" stroke="${color}" stroke-width="2" fill="none" stroke-linejoin="round" stroke-linecap="round" opacity="0.9"/>`;
+  };
+
+  const dots = (getter: (d: DayStats) => number, color: string): string =>
+    trend
+      .map((d, i) => {
+        const v = getter(d);
+        if (v === 0) return '';
+        const cx = (i * xStep).toFixed(1);
+        const cy = (h - pad - (v / maxTotal) * (h - pad * 2)).toFixed(1);
+        return `<circle cx="${cx}" cy="${cy}" r="3" fill="${color}" opacity="0.85"/>`;
+      })
+      .join('');
+
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" fill="none" xmlns="http://www.w3.org/2000/svg">
+    ${polyPoints((d) => d.passed, 'var(--success)')}
+    ${polyPoints((d) => d.failed, 'var(--failure)')}
+    ${dots((d) => d.passed, 'var(--success)')}
+    ${dots((d) => d.failed, 'var(--failure)')}
+  </svg>`;
+}
+
+function computeMostFailingFlows(
+  runs: RunIndexEntry[],
+  limit = 3
+): Array<{ name: string; failures: number; total: number }> {
+  const flowMap = new Map<string, { name: string; failures: number; total: number }>();
+  for (const run of runs) {
+    const key = run.flowFile;
+    const name = run.flowName || run.flowFile.split('/').pop() || key;
+    if (!flowMap.has(key)) flowMap.set(key, { name, failures: 0, total: 0 });
+    const entry = flowMap.get(key)!;
+    entry.total++;
+    if (!run.success) entry.failures++;
+  }
+  return Array.from(flowMap.values())
+    .filter((f) => f.failures > 0)
+    .sort((a, b) => b.failures - a.failures || b.total - a.total)
+    .slice(0, limit);
+}
+
+function renderAnalyticsSection(runs: RunIndexEntry[]): string {
+  if (runs.length === 0) return '';
+
+  const trend = computeTrendData(runs, 14);
+  const sparkline = renderSparklineSvg(trend);
+
+  const androidCount = runs.filter((r) => r.platform === 'android').length;
+  const iosCount = runs.filter((r) => r.platform === 'ios').length;
+  const totalPlatform = androidCount + iosCount || 1;
+  const androidPct = ((androidCount / totalPlatform) * 100).toFixed(0);
+  const iosPct = ((iosCount / totalPlatform) * 100).toFixed(0);
+
+  const durationRuns = runs.filter((r) => r.durationMs > 0);
+  const avgDuration =
+    durationRuns.length > 0
+      ? formatDuration(
+          Math.round(durationRuns.reduce((s, r) => s + r.durationMs, 0) / durationRuns.length)
+        )
+      : '—';
+
+  const mostFailing = computeMostFailingFlows(runs);
+
+  const failingRows = mostFailing
+    .map((f) => {
+      const pct = ((f.failures / f.total) * 100).toFixed(0);
+      return `<div class="failing-flow-row">
+        <div class="failing-flow-name">${escapeHtml(f.name)}</div>
+        <div class="failing-flow-bar-wrap">
+          <div class="failing-flow-bar" style="width:${pct}%"></div>
+        </div>
+        <span class="failing-flow-count">${f.failures}/${f.total}</span>
+      </div>`;
+    })
+    .join('');
+
+  return `<section class="analytics-section animate-in" id="analytics-section">
+    <div class="analytics-card sparkline-card">
+      <div class="analytics-card-header">
+        <span class="analytics-card-label">14-Day Trend</span>
+        <div class="sparkline-legend">
+          <span class="sparkline-legend-dot" style="background:var(--success)"></span><span>Pass</span>
+          <span class="sparkline-legend-dot" style="background:var(--failure)"></span><span>Fail</span>
+        </div>
+      </div>
+      <div class="sparkline-wrap" id="sparkline-wrap">${sparkline}</div>
+    </div>
+    <div class="analytics-card">
+      <div class="analytics-card-label">Platform Split</div>
+      <div class="platform-split-labels">
+        <span>${iconAndroid()} Android <strong>${androidPct}%</strong></span>
+        <span>${iconApple()} iOS <strong>${iosPct}%</strong></span>
+      </div>
+      <div class="platform-split-bar">
+        <div class="platform-split-android" style="width:${androidPct}%" title="Android ${androidCount}"></div>
+        <div class="platform-split-ios" style="width:${iosPct}%" title="iOS ${iosCount}"></div>
+      </div>
+      <div class="analytics-card-label" style="margin-top:14px">Avg Duration</div>
+      <div class="analytics-avg-dur">${escapeHtml(avgDuration)}</div>
+    </div>
+    <div class="analytics-card failing-flows-card">
+      <div class="analytics-card-label">Most Failing Flows</div>
+      ${mostFailing.length === 0 ? '<div class="analytics-empty">No failures 🎉</div>' : failingRows}
+    </div>
+  </section>`;
+}
+
 export function renderIndexPage(index: RunIndex): string {
   const runs = index.runs;
   const rate = successRate(runs);
@@ -429,6 +573,7 @@ export function renderIndexPage(index: RunIndex): string {
   <title>AppClaw Reports</title>
   <script>(function(){var t=localStorage.getItem('appclaw-theme')||'dark';document.documentElement.setAttribute('data-theme',t)})()</script>
   ${fontLinks()}
+  ${animeScript()}
   <style>
     ${sharedCss()}
 
@@ -790,6 +935,184 @@ export function renderIndexPage(index: RunIndex): string {
       .stats-row { grid-template-columns: 1fr 1fr; }
       .page { padding: 16px 16px 48px; }
     }
+
+    /* ── Analytics Section ── */
+    .analytics-section {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    .analytics-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 18px 20px;
+      transition: border-color 0.2s;
+    }
+    .analytics-card:hover { border-color: var(--border-emphasis); }
+    .analytics-card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    .analytics-card-label {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--text-tertiary);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 10px;
+      display: block;
+    }
+    .sparkline-legend {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 11px;
+      color: var(--text-tertiary);
+    }
+    .sparkline-legend-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .sparkline-wrap svg { width: 100%; height: 52px; overflow: visible; }
+    .platform-split-labels {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      color: var(--text-secondary);
+      margin-bottom: 8px;
+      gap: 8px;
+    }
+    .platform-split-labels strong { color: var(--text-primary); }
+    .platform-split-labels span {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .platform-split-bar {
+      height: 8px;
+      border-radius: 999px;
+      background: var(--bg-elevated);
+      display: flex;
+      overflow: hidden;
+    }
+    .platform-split-android {
+      background: var(--accent);
+      transition: width 0.6s ease-out;
+    }
+    .platform-split-ios {
+      background: var(--accent);
+      opacity: 0.45;
+      transition: width 0.6s ease-out;
+    }
+    .analytics-avg-dur {
+      font-family: 'Lora', Georgia, serif;
+      font-size: 26px;
+      font-weight: 700;
+      color: var(--text-primary);
+      line-height: 1;
+    }
+    .failing-flow-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    .failing-flow-row:last-child { margin-bottom: 0; }
+    .failing-flow-name {
+      font-size: 12px;
+      color: var(--text-secondary);
+      min-width: 0;
+      flex: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .failing-flow-bar-wrap {
+      width: 80px;
+      height: 6px;
+      background: var(--bg-elevated);
+      border-radius: 999px;
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+    .failing-flow-bar {
+      height: 100%;
+      background: var(--failure);
+      opacity: 0.75;
+      border-radius: 999px;
+      transition: width 0.6s ease-out;
+    }
+    .failing-flow-count {
+      font-size: 11px;
+      font-family: 'JetBrains Mono', monospace;
+      color: var(--failure);
+      flex-shrink: 0;
+    }
+    .analytics-empty {
+      font-size: 13px;
+      color: var(--text-tertiary);
+      margin-top: 4px;
+    }
+
+    /* ── Filter Bar ── */
+    .filter-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 24px;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg-inset);
+      flex-wrap: wrap;
+    }
+    .filter-search {
+      flex: 1;
+      min-width: 160px;
+      padding: 6px 12px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      font-family: 'Sora', sans-serif;
+      font-size: 12px;
+      color: var(--text-primary);
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .filter-search::placeholder { color: var(--text-tertiary); }
+    .filter-search:focus { border-color: var(--accent-border); }
+    .filter-chip {
+      padding: 4px 12px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+      font-family: 'Sora', sans-serif;
+      letter-spacing: 0.03em;
+      cursor: pointer;
+      transition: all 0.15s;
+      background: transparent;
+      color: var(--text-secondary);
+    }
+    .filter-chip:hover { border-color: var(--border-emphasis); color: var(--text-primary); }
+    .filter-chip.active { background: var(--accent-dim); color: var(--accent); border-color: var(--accent-border); }
+    .filter-clear {
+      font-size: 11px;
+      color: var(--text-tertiary);
+      cursor: pointer;
+      padding: 4px 8px;
+      background: none;
+      border: none;
+      font-family: 'Sora', sans-serif;
+      transition: color 0.15s;
+    }
+    .filter-clear:hover { color: var(--text-primary); }
+    .filter-hidden { display: none !important; }
+
+    @media (max-width: 960px) { .analytics-section { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
@@ -834,7 +1157,7 @@ export function renderIndexPage(index: RunIndex): string {
     })()}
 
     <!-- Stats -->
-    <section class="stats-row animate-in animate-in-2">
+    <section class="stats-row animate-in" id="stats-row">
       <div class="stat-card">
         <div class="stat-label">Total Runs</div>
         <div class="stat-value">${runs.length}</div>
@@ -856,11 +1179,14 @@ export function renderIndexPage(index: RunIndex): string {
       </div>
     </section>
 
+    <!-- Analytics -->
+    ${renderAnalyticsSection(runs)}
+
     <!-- Run List -->
-    <section class="runs-panel animate-in animate-in-3">
+    <section class="runs-panel animate-in" id="runs-panel">
       <div class="runs-header">
         <h2>Run History</h2>
-        <span class="runs-count">${runs.length} run${runs.length !== 1 ? 's' : ''}</span>
+        <span class="runs-count" id="runs-count">${runs.length} run${runs.length !== 1 ? 's' : ''}</span>
       </div>
       ${
         runs.length === 0
@@ -868,7 +1194,15 @@ export function renderIndexPage(index: RunIndex): string {
             <p>No flow runs recorded yet.</p>
             <p>Run a YAML flow with <code>appclaw --flow</code> to get started.</p>
           </div>`
-          : `<div class="run-list-header">
+          : `<div class="filter-bar" id="filter-bar">
+            <input class="filter-search" id="filter-search" type="search" placeholder="Search flows…" oninput="applyFilters()" autocomplete="off">
+            <button class="filter-chip" id="chip-passed" onclick="toggleChip('passed')">✓ Passed</button>
+            <button class="filter-chip" id="chip-failed" onclick="toggleChip('failed')">✗ Failed</button>
+            <button class="filter-chip" id="chip-android" onclick="toggleChip('android')">${iconAndroid()} Android</button>
+            <button class="filter-chip" id="chip-ios" onclick="toggleChip('ios')">${iconApple()} iOS</button>
+            <button class="filter-clear" id="filter-clear" onclick="clearFilters()" style="display:none">Clear</button>
+          </div>
+          <div class="run-list-header" id="run-list-header">
             <span></span>
             <span class="col-label">Flow</span>
             <span class="col-label">Platform</span>
@@ -876,11 +1210,16 @@ export function renderIndexPage(index: RunIndex): string {
             <span class="col-label">Duration</span>
             <span class="col-label">Status</span>
           </div>
-          ${renderRunList(runs, index.suites ?? [])}`
+          <div id="run-list-body">
+          ${renderRunList(runs, index.suites ?? [])}
+          </div>`
       }
     </section>
   </main>
   <script>
+    var _knownRunCount = ${runs.length};
+
+    /* ── Suite toggle ── */
     function toggleSuite(suiteId) {
       var children = document.getElementById('suite-children-' + suiteId);
       var toggle = document.getElementById('suite-toggle-' + suiteId);
@@ -893,6 +1232,126 @@ export function renderIndexPage(index: RunIndex): string {
         toggle.classList.add('open');
       }
     }
+
+    /* ── Filter logic ── */
+    var _activeChips = {};
+
+    function toggleChip(id) {
+      _activeChips[id] = !_activeChips[id];
+      var el = document.getElementById('chip-' + id);
+      if (el) el.classList.toggle('active', !!_activeChips[id]);
+      updateClearBtn();
+      applyFilters();
+    }
+
+    function clearFilters() {
+      _activeChips = {};
+      ['passed','failed','android','ios'].forEach(function(id) {
+        var el = document.getElementById('chip-' + id);
+        if (el) el.classList.remove('active');
+      });
+      var s = document.getElementById('filter-search');
+      if (s) s.value = '';
+      updateClearBtn();
+      applyFilters();
+    }
+
+    function updateClearBtn() {
+      var hasChips = Object.values(_activeChips).some(Boolean);
+      var hasText = (document.getElementById('filter-search') || {}).value;
+      var btn = document.getElementById('filter-clear');
+      if (btn) btn.style.display = (hasChips || hasText) ? '' : 'none';
+    }
+
+    function applyFilters() {
+      updateClearBtn();
+      var q = ((document.getElementById('filter-search') || {}).value || '').toLowerCase().trim();
+      var filterPassed = _activeChips['passed'];
+      var filterFailed = _activeChips['failed'];
+      var filterAndroid = _activeChips['android'];
+      var filterIos = _activeChips['ios'];
+
+      /* items are .run-item, .suite-child-run, or .suite-group */
+      var items = document.querySelectorAll('.run-item, .suite-child-run');
+      var suiteGroups = document.querySelectorAll('.suite-group');
+      var visible = 0;
+
+      items.forEach(function(el) {
+        var name = (el.querySelector('.run-name, .child-run-name') || {}).textContent || '';
+        var file = (el.querySelector('.run-file, .child-run-device') || {}).textContent || '';
+        var platform = (el.querySelector('.run-platform') || {}).textContent || '';
+        var success = el.classList.contains('failed-row') === false;
+
+        var matchText = !q || name.toLowerCase().includes(q) || file.toLowerCase().includes(q);
+        var matchStatus = (!filterPassed && !filterFailed) || (filterPassed && success) || (filterFailed && !success);
+        var matchPlat = (!filterAndroid && !filterIos)
+          || (filterAndroid && platform.toLowerCase().includes('android'))
+          || (filterIos && platform.toLowerCase().includes('ios'));
+
+        var show = matchText && matchStatus && matchPlat;
+        el.classList.toggle('filter-hidden', !show);
+        if (show) visible++;
+      });
+
+      /* hide suite rows where all children are hidden */
+      suiteGroups.forEach(function(g) {
+        var children = g.querySelectorAll('.suite-child-run');
+        var anyVisible = Array.from(children).some(function(c) { return !c.classList.contains('filter-hidden'); });
+        var suiteRow = g.querySelector('.suite-row');
+        if (suiteRow) suiteRow.classList.toggle('filter-hidden', !anyVisible);
+      });
+
+      /* standalone run-items visible count */
+      var standaloneVisible = document.querySelectorAll('.run-item:not(.filter-hidden)').length;
+      var suiteVisible = Array.from(suiteGroups).filter(function(g) {
+        return !g.querySelector('.suite-row.filter-hidden');
+      }).length;
+      var totalVisible = standaloneVisible + suiteVisible;
+      var countEl = document.getElementById('runs-count');
+      if (countEl) countEl.textContent = totalVisible + ' run' + (totalVisible !== 1 ? 's' : '');
+
+      var header = document.getElementById('run-list-header');
+      if (header) header.style.display = totalVisible === 0 ? 'none' : '';
+    }
+
+    /* ── Auto-refresh (poll every 5 s, reload if new runs appear; pauses when tab is hidden) ── */
+    setInterval(function() {
+      if (document.visibilityState === 'hidden') return;
+      fetch('/api/runs').then(function(r) { return r.json(); }).then(function(data) {
+        if (data && data.runs && data.runs.length !== _knownRunCount) {
+          location.reload();
+        }
+      }).catch(function() { /* offline / server down — ignore */ });
+    }, 5000);
+
+    /* ── anime.js entrance animations ── */
+    window.addEventListener('DOMContentLoaded', function() {
+      if (typeof anime === 'undefined') {
+        /* Fallback if CDN unreachable: just reveal all elements */
+        document.querySelectorAll('.animate-in').forEach(function(el) {
+          el.style.opacity = '1';
+          el.style.transform = 'none';
+        });
+        return;
+      }
+
+      /* Respect prefers-reduced-motion */
+      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        document.querySelectorAll('.animate-in').forEach(function(el) {
+          el.style.opacity = '1';
+          el.style.transform = 'none';
+        });
+        return;
+      }
+
+      anime.timeline({ easing: 'easeOutQuart', duration: 420 })
+        .add({ targets: '.page-header', opacity: [0, 1], translateY: [-10, 0] })
+        .add({ targets: '.health-banner', opacity: [0, 1], translateY: [-10, 0], duration: 380 }, '-=240')
+        .add({ targets: '.stat-card', opacity: [0, 1], translateY: [-8, 0], duration: 320, delay: anime.stagger(55) }, '-=260')
+        .add({ targets: '#analytics-section', opacity: [0, 1], translateY: [-8, 0], duration: 340 }, '-=180')
+        .add({ targets: '#runs-panel', opacity: [0, 1], translateY: [-8, 0], duration: 340 }, '-=220')
+        .add({ targets: '.run-item, .suite-row', opacity: [0, 1], translateX: [-6, 0], duration: 220, delay: anime.stagger(18) }, '-=260');
+    });
   </script>
   ${themeScript()}
 </body>
@@ -1033,6 +1492,7 @@ export function renderRunPage(manifest: RunManifest): string {
   <title>${escapeHtml(name)} — AppClaw Report</title>
   <script>(function(){var t=localStorage.getItem('appclaw-theme')||'dark';document.documentElement.setAttribute('data-theme',t)})()</script>
   ${fontLinks()}
+  ${animeScript()}
   <style>
     ${sharedCss()}
 
@@ -1590,6 +2050,125 @@ export function renderRunPage(manifest: RunManifest): string {
       .workspace { grid-template-columns: 1fr; }
       .page { padding: 16px 16px 48px; }
     }
+
+    /* ── Export button ── */
+    .export-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      border-radius: var(--radius-md);
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      color: var(--text-secondary);
+      font-family: 'Sora', sans-serif;
+      font-size: 12px;
+      font-weight: 500;
+      text-decoration: none;
+      transition: all 0.15s;
+      cursor: pointer;
+    }
+    .export-btn:hover {
+      border-color: var(--accent-border);
+      color: var(--accent);
+      background: var(--accent-dim);
+      opacity: 1;
+    }
+
+    /* ── Step duration bar ── */
+    .step-duration-bar-wrap {
+      margin-top: 5px;
+      height: 3px;
+      border-radius: 3px;
+      background: var(--bg-elevated);
+      overflow: hidden;
+    }
+    .step-duration-bar {
+      height: 100%;
+      border-radius: 3px;
+      background: var(--accent);
+      opacity: 0.5;
+      transition: width 0.3s ease-out;
+    }
+    .step-item.failed-step .step-duration-bar { background: var(--failure); opacity: 0.6; }
+
+    /* ── Jump-to-failure button ── */
+    .jump-failure-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 9px;
+      border-radius: var(--radius-sm);
+      background: var(--failure-dim);
+      border: 1px solid var(--failure-border);
+      color: var(--failure);
+      font-family: 'Sora', sans-serif;
+      font-size: 10px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.15s;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+    }
+    .jump-failure-btn:hover { background: rgba(248,113,113,0.18); }
+
+    /* ── Appium Log Panel ── */
+    .appium-log-panel {
+      margin-top: 16px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+      background: var(--bg-surface);
+    }
+    .appium-log-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 18px;
+      cursor: pointer;
+      user-select: none;
+      background: var(--bg-inset);
+      border-bottom: 1px solid var(--border);
+      transition: background 0.15s;
+    }
+    .appium-log-header:hover { background: var(--bg-hover); }
+    .appium-log-title {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .appium-log-title-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--failure);
+      flex-shrink: 0;
+    }
+    .appium-log-chevron {
+      color: var(--text-tertiary);
+      font-size: 12px;
+      transition: transform 0.2s;
+    }
+    .appium-log-chevron.open { transform: rotate(180deg); }
+    .appium-log-body {
+      display: none;
+      padding: 16px 18px;
+      overflow-x: auto;
+    }
+    .appium-log-body.expanded { display: block; }
+    .appium-log-pre {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      line-height: 1.65;
+      color: var(--text-secondary);
+      white-space: pre;
+      overflow-x: auto;
+      margin: 0;
+    }
   </style>
 </head>
 <body>
@@ -1604,6 +2183,10 @@ export function renderRunPage(manifest: RunManifest): string {
         </div>
       </div>
       <div style="display:flex;align-items:center;gap:10px;flex-shrink:0">
+        <a class="export-btn" href="/api/runs/${escapeHtml(manifest.runId)}" download="${escapeHtml(manifest.runId)}.json" title="Download run JSON">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Export JSON
+        </a>
         <div class="theme-toggle" id="theme-toggle">
           <button id="theme-light" onclick="setTheme('light')">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
@@ -1658,12 +2241,15 @@ export function renderRunPage(manifest: RunManifest): string {
     ${hasPhases ? renderPhaseTrack(manifest) : ''}
 
     <!-- Workspace -->
-    <section class="workspace animate-in animate-in-2">
+    <section class="workspace animate-in" id="workspace">
       <!-- Timeline -->
       <div class="timeline">
         <div class="timeline-header">
           <h3>Steps</h3>
-          <span style="font-size:11px;color:var(--text-tertiary);font-family:'JetBrains Mono',monospace">${manifest.steps.length}</span>
+          <div style="display:flex;align-items:center;gap:8px">
+            ${!manifest.success ? `<button class="jump-failure-btn" onclick="jumpToFailure()" title="Jump to failed step">↓ Failure</button>` : ''}
+            <span style="font-size:11px;color:var(--text-tertiary);font-family:'JetBrains Mono',monospace">${manifest.steps.length}</span>
+          </div>
         </div>
         <div class="timeline-scroll">
           ${renderStepTimeline(manifest)}
@@ -1739,6 +2325,7 @@ export function renderRunPage(manifest: RunManifest): string {
         </div>
       </div>
     </section>
+    ${renderAppiumLogPanel(manifest)}
   </main>
 
   <script>
@@ -2014,6 +2601,52 @@ export function renderRunPage(manifest: RunManifest): string {
     if (steps.length > 0) {
       window.addEventListener('DOMContentLoaded', function() { selectStep(steps[0].index); });
     }
+
+    // Jump to failed step
+    function jumpToFailure() {
+      var failed = steps.find(function(s) { return s.status === 'failed'; });
+      if (!failed) return;
+      selectStep(failed.index);
+      var btn = document.querySelector('[data-step="' + failed.index + '"]');
+      if (btn) btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    // Appium log toggle
+    function toggleAppiumLog() {
+      var body = document.getElementById('appium-log-body');
+      var chevron = document.getElementById('appium-log-chevron');
+      if (!body) return;
+      var open = body.classList.toggle('expanded');
+      if (chevron) chevron.classList.toggle('open', open);
+    }
+
+    // anime.js entrance animations for run detail page
+    window.addEventListener('DOMContentLoaded', function() {
+      if (typeof anime === 'undefined') {
+        document.querySelectorAll('.animate-in').forEach(function(el) {
+          el.style.opacity = '1';
+          el.style.transform = 'none';
+        });
+        return;
+      }
+
+      /* Respect prefers-reduced-motion */
+      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        document.querySelectorAll('.animate-in').forEach(function(el) {
+          el.style.opacity = '1';
+          el.style.transform = 'none';
+        });
+        return;
+      }
+
+      anime.timeline({ easing: 'easeOutQuart', duration: 400 })
+        .add({ targets: '.run-header', opacity: [0, 1], translateY: [-10, 0] })
+        .add({ targets: '.status-hero', opacity: [0, 1], translateY: [-8, 0], duration: 360 }, '-=220')
+        .add({ targets: '.phase-track', opacity: [0, 1], translateY: [-6, 0], duration: 300 }, '-=200')
+        .add({ targets: '#workspace', opacity: [0, 1], translateY: [-8, 0], duration: 360 }, '-=220')
+        .add({ targets: '.step-item', opacity: [0, 1], translateX: [-5, 0], duration: 180, delay: anime.stagger(12) }, '-=300')
+        .add({ targets: '.appium-log-panel', opacity: [0, 1], translateY: [6, 0], duration: 280 }, '-=80');
+    });
   </script>
   ${themeScript()}
 </body>
@@ -2039,6 +2672,7 @@ function renderPhaseTrack(manifest: RunManifest): string {
 
 function renderStepTimeline(manifest: RunManifest): string {
   const hasPhases = manifest.phaseResults && manifest.phaseResults.length > 0;
+  const maxDuration = Math.max(1, ...manifest.steps.map((s) => s.durationMs));
   let html = '';
   let currentPhase: FlowPhase | null = null;
 
@@ -2047,7 +2681,7 @@ function renderStepTimeline(manifest: RunManifest): string {
       currentPhase = step.phase;
       html += `<div class="phase-divider">${phaseLabel(step.phase)}</div>`;
     }
-    html += renderStepItem(step);
+    html += renderStepItem(step, maxDuration);
   }
 
   if (manifest.steps.length === 0) {
@@ -2057,10 +2691,11 @@ function renderStepTimeline(manifest: RunManifest): string {
   return html;
 }
 
-function renderStepItem(step: StepArtifact): string {
+function renderStepItem(step: StepArtifact, maxDuration = 1): string {
   const isFirst = step.index === 0;
   const label = step.verbatim || step.target || step.kind;
   const failedCls = step.status === 'failed' ? ' failed-step' : '';
+  const durPct = Math.max(2, Math.round((step.durationMs / maxDuration) * 100));
   return `
     <button
       class="step-item${isFirst ? ' selected' : ''}${failedCls}"
@@ -2077,6 +2712,9 @@ function renderStepItem(step: StepArtifact): string {
           </div>
         </div>
         <span class="step-time">${escapeHtml(formatDuration(step.durationMs))}</span>
+      </div>
+      <div class="step-duration-bar-wrap">
+        <div class="step-duration-bar" style="width:${durPct}%"></div>
       </div>
       ${step.status === 'failed' && step.error ? `<div class="step-error-inline">${escapeHtml(step.error)}</div>` : ''}
     </button>`;
@@ -2101,3 +2739,24 @@ function renderStepDetailInfo(step: StepArtifact): string {
   }
   return html;
 }
+
+/* ─── Appium Log Panel ───────────────────────────────────── */
+
+function renderAppiumLogPanel(manifest: RunManifest): string {
+  const log = manifest.failureLogs?.appiumMcp;
+  if (!log) return '';
+  return `
+  <div class="appium-log-panel animate-in" style="margin-top:16px">
+    <div class="appium-log-header" onclick="toggleAppiumLog()">
+      <span class="appium-log-title">
+        <span class="appium-log-title-dot"></span>
+        Appium MCP Log (failure context)
+      </span>
+      <span class="appium-log-chevron" id="appium-log-chevron">▼</span>
+    </div>
+    <div class="appium-log-body" id="appium-log-body">
+      <pre class="appium-log-pre">${escapeHtml(log)}</pre>
+    </div>
+  </div>`;
+}
+
