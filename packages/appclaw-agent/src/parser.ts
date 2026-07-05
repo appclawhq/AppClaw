@@ -7,7 +7,7 @@ export function parseInvocation(argv: string[]): ParsedInvocation {
   let session = 'default';
   let json = false;
 
-  for (let i = 0; i < args.length; ) {
+  for (let i = 0; i < args.length;) {
     if (args[i] === '--session') {
       session = required(args[i + 1], '--session requires a name');
       args.splice(i, 2);

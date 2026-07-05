@@ -41,6 +41,7 @@
     "lint": "npm run typecheck",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "preview": "npx tsx scripts/generate-preview.ts preview",
     "test": "vitest run tests/flow tests/sdk tests/ui",
     "test:e2e": "vitest run tests/e2e/",
     "test:e2e:android": "MCP_DEBUG=1 vitest run tests/vodqa.test.ts",

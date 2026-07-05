@@ -35,6 +35,16 @@ jobs:
       - name: Test
         run: npm test
 
+      - name: Generate report preview
+        run: npm run preview
+
+      - name: Upload report preview
+        uses: actions/upload-artifact@v4
+        with:
+          name: report-preview
+          path: preview/
+          retention-days: 14
+
   vscode-extension:
     name: VS Code extension — typecheck & build
     runs-on: ubuntu-latest

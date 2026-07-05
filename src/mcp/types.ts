@@ -48,8 +48,7 @@ export interface MCPToolResult {
 }
 
 export type MCPContent =
-  | { type: 'text'; text: string }
-  | { type: 'image'; data: string; mimeType: string };
+  { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string };
 
 export interface MCPToolInfo {
   name: string;

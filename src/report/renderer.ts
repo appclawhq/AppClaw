@@ -2759,4 +2759,3 @@ function renderAppiumLogPanel(manifest: RunManifest): string {
     </div>
   </div>`;
 }
-

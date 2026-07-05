@@ -30,14 +30,7 @@ export interface StepData {
 }
 
 export type LogKind =
-  | 'info'
-  | 'warn'
-  | 'error'
-  | 'bullet'
-  | 'recovery'
-  | 'stuck'
-  | 'reasoning'
-  | 'preprocessor';
+  'info' | 'warn' | 'error' | 'bullet' | 'recovery' | 'stuck' | 'reasoning' | 'preprocessor';
 
 export interface LogEntry {
   kind: LogKind;
