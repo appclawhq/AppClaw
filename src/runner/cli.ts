@@ -69,6 +69,9 @@ function parseArgs(argv: string[]): ParsedArgs {
       case '--grep':
         overrides.grep = next();
         break;
+      case '--ignore':
+        (overrides.testIgnore ??= []).push(next());
+        break;
       case '--grep-invert':
         overrides.grepInvert = next();
         break;
@@ -144,6 +147,7 @@ Options:
   --timeout <ms>          per-test timeout
   --grep <regex>          run only tests whose title matches
   --grep-invert <regex>   skip tests whose title matches
+  --ignore <pattern>      exclude spec files (repeatable; adds to testIgnore)
   --shard <x/n>           run shard x of n
   --reporter <name>       reporter (list, html, plain)
   --platform <p>          android | ios
@@ -209,8 +213,11 @@ export async function runCli(argv: string[]): Promise<number> {
     config.testFilter
   );
   if (specs.length === 0) {
+    const hint = config.testIgnore.length
+      ? ` (testIgnore/--ignore excludes: ${config.testIgnore.join(', ')})`
+      : '';
     // eslint-disable-next-line no-console
-    console.error(`No spec files found under "${config.testDir}".`);
+    console.error(`No spec files found under "${config.testDir}"${hint}.`);
     return 1;
   }
 

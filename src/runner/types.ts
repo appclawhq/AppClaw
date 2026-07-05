@@ -137,6 +137,8 @@ export interface RunnerConfig<State = unknown> extends AppClawOptions {
 /** Per-run overrides parsed from the CLI; each wins over the config file. */
 export interface CliOverrides {
   testFilter?: string[];
+  /** `--ignore` patterns; additive — stacked on top of the config's `testIgnore`. */
+  testIgnore?: string[];
   platform?: Platform;
   concurrency?: number;
   retries?: number;

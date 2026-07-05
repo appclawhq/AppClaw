@@ -107,7 +107,10 @@ export function resolveConfig(fileConfig: RunnerConfig, cli: CliOverrides = {}):
   return {
     testDir: testDir ?? DEFAULTS.testDir,
     testMatch: asArray(testMatch) ?? DEFAULTS.testMatch,
-    testIgnore: asArray(testIgnore) ?? DEFAULTS.testIgnore,
+    // `--ignore` stacks on top of the config's testIgnore (both apply) rather
+    // than replacing it — excluding more from the CLI shouldn't un-exclude
+    // what the config already filters out.
+    testIgnore: [...(asArray(testIgnore) ?? DEFAULTS.testIgnore), ...(cli.testIgnore ?? [])],
     testFilter: cli.testFilter ?? [],
 
     platform,

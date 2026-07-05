@@ -24,10 +24,12 @@ function cloudOptionsCaps(): Record<string, unknown> {
           isRealMobile: true,
           deviceName: 'Pixel 4a',
           platformVersion: '12',
-          app: 'lt://APP10160431111775634745871487',
+          // App ids go stale when the upload expires or is deleted on the hub —
+          // re-upload and set CLOUD_APP to override without a code change.
+          app: process.env.CLOUD_APP ?? 'lt://APP10160371691782901740218341',
           build,
           project,
-          name: 'AppClaw Runner'
+          name: 'AppClaw Runner',
         },
       };
     case 'browserstack':
@@ -62,6 +64,11 @@ function cloudOptionsCaps(): Record<string, unknown> {
 export default defineConfig({
   video: true,
   testDir: 'tests',
+  // Cloud specs need a provider hub — leave them out of a local run's
+  // discovery (`appclaw test` with no CLOUD_PROVIDER set). The cloud CI sets
+  // CLOUD_PROVIDER, so there the spec is discovered as usual. One-off
+  // exclusions also work from the CLI: `appclaw test --ignore <pattern>`.
+  testIgnore: isCloud ? [] : ['**/lambdatest-cloud.spec.ts'],
   concurrency: 'auto',
   retries: 1,
   // Local appium-mcp SSE node either way. In cloud mode the local node still

@@ -61,7 +61,28 @@ npm run test:login                # one file
 `appclaw test` auto-discovers `appclaw.config.ts` in the working directory and
 runs the specs in `testDir`. You can also call the binary directly
 (`npx appclaw test ...`) with the same flags: `--workers`, `--retries`,
-`--grep`, `--shard 1/2`, etc.
+`--grep`, `--shard 1/2`, `--ignore <pattern>`, etc.
+
+### Excluding specs from a run
+
+Some specs shouldn't be part of every run — here `lambdatest-cloud.spec.ts`
+needs cloud credentials and a provider hub. Two ways to leave specs out:
+
+- **Config (`testIgnore`)** — patterns excluded at discovery. This example
+  ignores the cloud spec unless `CLOUD_PROVIDER` is set, so plain
+  `appclaw test` (local emulators) never picks it up while the cloud CI —
+  which sets `CLOUD_PROVIDER` — runs it as usual:
+
+  ```ts
+  testIgnore: isCloud ? [] : ['**/lambdatest-cloud.spec.ts'],
+  ```
+
+- **CLI (`--ignore`)** — one-off exclusions, repeatable, stacked on top of the
+  config's `testIgnore`:
+
+  ```bash
+  appclaw test --ignore lambdatest-cloud --ignore fixtures-demo
+  ```
 
 ### Live view
 
