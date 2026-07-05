@@ -48,8 +48,8 @@ jobs:
       # are inline in examples/runner/appclaw.config.ts under `lt:options` —
       # change device/OS by editing that file, not by adding secrets.
       CLOUD_PROVIDER: lambdatest
-      CLOUD_USERNAME: ${{ secrets.LT_USERNAME }}
-      CLOUD_ACCESS_KEY: ${{ secrets.LT_ACCESS_KEY }}
+      CLOUD_USERNAME: ${{ secrets.CLOUD_USERNAME }}
+      CLOUD_ACCESS_KEY: ${{ secrets.CLOUD_ACCESS_KEY }}
       CLOUD_BUILD_NAME: appclaw-runner-${{ github.run_id }}
       CLOUD_PROJECT_NAME: AppClaw Runner E2E
 
@@ -79,13 +79,13 @@ jobs:
           npm link appclaw
 
       # ── Sanity-check the cloud creds are wired ───────────────────────────
-      - name: Verify LambdaTest secrets
+      - name: Verify cloud secrets
         run: |
           missing=()
-          [ -n "${CLOUD_USERNAME}" ]   || missing+=("LT_USERNAME")
-          [ -n "${CLOUD_ACCESS_KEY}" ] || missing+=("LT_ACCESS_KEY")
+          [ -n "${CLOUD_USERNAME}" ]   || missing+=("CLOUD_USERNAME")
+          [ -n "${CLOUD_ACCESS_KEY}" ] || missing+=("CLOUD_ACCESS_KEY")
           if [ ${#missing[@]} -ne 0 ]; then
-            echo "::error title=Missing LambdaTest secrets::${missing[*]}"
+            echo "::error title=Missing cloud secrets::${missing[*]}"
             exit 1
           fi
 
