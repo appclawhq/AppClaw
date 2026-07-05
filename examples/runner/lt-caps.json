@@ -1,0 +1,12 @@
+{
+  "lt:options": {
+    "w3c": true,
+    "platformName": "android",
+    "deviceName": "Realme GT2 Pro",
+    "platformVersion": "12",
+    "app": "lt://APP10160371691782901740218341",
+    "build": "Appclaw",
+    "name": "AppclawIntro",
+    "isRealMobile": true
+  }
+}

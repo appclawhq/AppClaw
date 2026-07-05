@@ -64,6 +64,19 @@ export interface AppClawOptions {
    * Maps to the CAPABILITIES_FILE env var.
    */
   capabilitiesFile?: string;
+  /**
+   * Inline Appium capabilities merged into the session — useful for keeping
+   * provider-specific caps (`lt:options`, `bstack:options`, `sauce:options`,
+   * or plain `appium:*` fields) alongside the rest of your config instead of
+   * in a separate JSON file. Accepts the same shape as `capabilitiesFile`,
+   * including the platform-scoped form `{ android: {...}, ios: {...} }`.
+   *
+   * Precedence (later wins): config defaults < `capabilities` <
+   * `capabilitiesFile` < framework-managed caps (parallel ports, pinned udid).
+   * So `capabilitiesFile` acts as an environment-specific override on top of
+   * this inline baseline.
+   */
+  capabilities?: Record<string, unknown>;
   /** Interaction strategy: DOM locators (default) or AI vision. */
   agentMode?: AgentMode;
   /** Maximum number of agent steps before giving up. Default: 30. */

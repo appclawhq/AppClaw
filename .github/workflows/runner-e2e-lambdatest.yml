@@ -1,0 +1,105 @@
+name: Runner E2E (LambdaTest cloud)
+
+# End-to-end test of the runner against LambdaTest's real device cloud
+# (examples/runner/tests/lambdatest-cloud.spec.ts). No local emulator is
+# needed — the runner synthesizes a single-device pool from CLOUD_DEVICE_NAME
+# and the SDK routes the Appium session to LambdaTest via the local appium-mcp
+# node (CLOUD_PROVIDER=lambdatest → remoteServerUrl).
+#
+# Runs on demand and when the runner, the cloud path, or the spec/config changes.
+
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: 'LLM provider'
+        required: false
+        default: 'gemini'
+      model:
+        description: 'LLM model ID (blank = provider default)'
+        required: false
+        default: ''
+  pull_request:
+    paths:
+      - 'src/runner/**'
+      - 'src/device/cloud.ts'
+      - 'src/device/session.ts'
+      - 'src/sdk/**'
+      - 'examples/runner/**'
+      - '.github/workflows/runner-e2e-lambdatest.yml'
+
+concurrency:
+  group: runner-e2e-lambdatest-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lambdatest:
+    name: Runner — LambdaTest cloud
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      LLM_PROVIDER: ${{ github.event.inputs.provider || 'gemini' }}
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      LLM_MODEL: ${{ github.event.inputs.model }}
+
+      # ── LambdaTest routing ────────────────────────────────────────────────
+      # Only creds + provider live in env. The device, OS version, and app id
+      # are inline in examples/runner/appclaw.config.ts under `lt:options` —
+      # change device/OS by editing that file, not by adding secrets.
+      CLOUD_PROVIDER: lambdatest
+      CLOUD_USERNAME: ${{ secrets.LT_USERNAME }}
+      CLOUD_ACCESS_KEY: ${{ secrets.LT_ACCESS_KEY }}
+      CLOUD_BUILD_NAME: appclaw-runner-${{ github.run_id }}
+      CLOUD_PROJECT_NAME: AppClaw Runner E2E
+
+      PLATFORM: android
+      # Plain reporter (no TUI dashboard) for readable CI logs.
+      APPCLAW_TUI: 'off'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      # ── Build the local AppClaw and expose it as a global `appclaw` ──────
+      - name: Build & link AppClaw
+        run: |
+          npm ci
+          npm run build
+          npm link
+
+      - name: Install example deps & link AppClaw
+        working-directory: examples/runner
+        run: |
+          npm install
+          npm link appclaw
+
+      # ── Sanity-check the cloud creds are wired ───────────────────────────
+      - name: Verify LambdaTest secrets
+        run: |
+          missing=()
+          [ -n "${CLOUD_USERNAME}" ]   || missing+=("LT_USERNAME")
+          [ -n "${CLOUD_ACCESS_KEY}" ] || missing+=("LT_ACCESS_KEY")
+          if [ ${#missing[@]} -ne 0 ]; then
+            echo "::error title=Missing LambdaTest secrets::${missing[*]}"
+            exit 1
+          fi
+
+      # ── Run the cloud spec ───────────────────────────────────────────────
+      # One worker: the synthetic pool has exactly one cloud device. Retries
+      # help absorb hub-side flakiness (queue waits, session startup timeouts).
+      - name: Run LambdaTest cloud spec
+        working-directory: examples/runner
+        run: appclaw test tests/lambdatest-cloud.spec.ts --workers 1 --retries 1 --reporter plain
+
+      - name: Upload runner report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runner-report-lambdatest
+          path: examples/runner/.appclaw/runs/
+          if-no-files-found: ignore

@@ -79,13 +79,15 @@ export interface ConnectedSession {
 
 export class McpSession {
   private readonly config: AppClawConfig;
+  private readonly inlineCaps?: Record<string, unknown>;
   private handle: SharedMCPClient | null = null;
   private scopedClient: MCPClient | null = null;
   private cachedTools: MCPToolInfo[] = [];
   private cachedAppResolver: AppResolver | null = null;
 
-  constructor(config: AppClawConfig) {
+  constructor(config: AppClawConfig, inlineCaps?: Record<string, unknown>) {
     this.config = config;
+    this.inlineCaps = inlineCaps;
   }
 
   /**
@@ -120,7 +122,8 @@ export class McpSession {
           this.config,
           platform,
           undefined,
-          extraCaps
+          extraCaps,
+          this.inlineCaps
         );
         this.scopedClient = scopedMcp;
         this.cachedTools = await this.handle.listTools();

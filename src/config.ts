@@ -268,11 +268,12 @@ export function loadConfig(overrides?: Record<string, string | undefined>): AppC
         `CLOUD_USERNAME and CLOUD_ACCESS_KEY are required when CLOUD_PROVIDER=${config.CLOUD_PROVIDER}`
       );
     }
-    if (!config.CLOUD_DEVICE_NAME || !config.CLOUD_OS_VERSION) {
-      throw new Error(
-        `CLOUD_DEVICE_NAME and CLOUD_OS_VERSION are required when CLOUD_PROVIDER=${config.CLOUD_PROVIDER}`
-      );
-    }
+    // Note: device / OS / app can come from CLOUD_DEVICE_NAME / CLOUD_OS_VERSION
+    // / CLOUD_APP, or from inline `capabilities` (top-level appium:* or a
+    // provider namespace like lt:options). We don't hard-fail here — the grid
+    // itself returns a clear W3C error if the merged caps are missing platform
+    // or device selectors, and requiring env vars would defeat the point of
+    // "everything inline in appclaw.config.ts".
   }
   return config;
 }

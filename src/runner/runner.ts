@@ -93,7 +93,23 @@ export class Runner<State = unknown> {
       this.nodeUrl = node.url;
       try {
         reporter.starting('Discovering devices…');
-        const pool = await discoverPool(node, this.config.platform);
+        // Cloud mode (CLOUD_PROVIDER set): skip local pool discovery — there is
+        // no local device to enumerate. Synthesize a single-entry pool; the
+        // SDK's cloud path ignores the placeholder udid and drives the device
+        // the provider hub returns. Device name is only cosmetic here (used in
+        // reports/logs) — the actual device is chosen by the caps sent to the
+        // grid, either from CLOUD_DEVICE_NAME or from inline capabilities.
+        const cloudProvider = process.env.CLOUD_PROVIDER?.trim();
+        const pool = cloudProvider
+          ? [
+              {
+                name: process.env.CLOUD_DEVICE_NAME || `${cloudProvider} cloud`,
+                udid: 'cloud',
+                state: 'booted' as const,
+                platform: this.config.platform,
+              },
+            ]
+          : await discoverPool(node, this.config.platform);
         if (pool.length === 0) {
           throw new Error(
             `No ${this.config.platform} devices found. Connect a device/emulator and retry.`

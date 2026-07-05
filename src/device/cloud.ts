@@ -117,18 +117,23 @@ function platformCaps(platform: Platform): Record<string, unknown> {
  * build/project convenience labels < user-supplied fileCaps (CAPABILITIES_FILE).
  * The caps file wins last so a user can override anything — including the
  * automationName or the provider-options namespace — for their grid.
+ *
+ * Device selectors (`appium:deviceName` / `appium:platformVersion` /
+ * `appium:app`) are injected ONLY when the CLOUD_* env vars are set. Callers
+ * who prefer to keep everything inline (e.g. `capabilities: { 'lt:options':
+ * { deviceName, platformVersion, app } }` in appclaw.config.ts) can omit the
+ * env vars entirely — the inline caps flow through fileCaps and reach the
+ * grid unchanged.
  */
 export function buildCloudCapabilities(
   config: AppClawConfig,
   platform: Platform,
   fileCaps: Record<string, unknown> = {}
 ): Record<string, unknown> {
-  const caps: Record<string, unknown> = {
-    ...platformCaps(platform),
-    'appium:deviceName': config.CLOUD_DEVICE_NAME,
-    'appium:platformVersion': config.CLOUD_OS_VERSION,
-    ...(config.CLOUD_APP ? { 'appium:app': config.CLOUD_APP } : {}),
-  };
+  const caps: Record<string, unknown> = { ...platformCaps(platform) };
+  if (config.CLOUD_DEVICE_NAME) caps['appium:deviceName'] = config.CLOUD_DEVICE_NAME;
+  if (config.CLOUD_OS_VERSION) caps['appium:platformVersion'] = config.CLOUD_OS_VERSION;
+  if (config.CLOUD_APP) caps['appium:app'] = config.CLOUD_APP;
 
   // Map build/project labels into the active provider's options namespace.
   // `custom` has no known namespace, so these are only applied for known providers.

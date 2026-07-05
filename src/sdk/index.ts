@@ -101,7 +101,7 @@ export class AppClaw {
     // every command would silently run in DOM mode. (With multiple instances in one
     // process the last constructed config wins, same as the pre-existing singleton.)
     applyConfig(this.config);
-    this.session = new McpSession(this.config);
+    this.session = new McpSession(this.config, options.capabilities);
 
     // `silent` controls per-step log lines (✓ #1 tap "label" ...). Default is
     // FALSE — most SDK consumers want to see what's happening on the device,

@@ -36,31 +36,45 @@ export interface SessionResult {
  *   Used for parallel runs to assign unique ports:
  *   - Android: `appium:systemPort`, `appium:mjpegServerPort`
  *   - iOS: `appium:wdaLocalPort`
+ * @param inlineCaps - Author-supplied capabilities from the SDK options object
+ *   (e.g. `new AppClaw({ capabilities: { 'lt:options': { ... } } })`).
+ *   Sits between config defaults and CAPABILITIES_FILE in precedence — a
+ *   file override still wins so environments can tweak per stage/CI.
  */
 export async function createPlatformSession(
   mcp: MCPClient,
   config: AppClawConfig,
   platform: Platform,
   _deviceType?: DeviceType,
-  extraCaps?: Record<string, unknown>
+  extraCaps?: Record<string, unknown>,
+  inlineCaps?: Record<string, unknown>
 ): Promise<SessionResult> {
   // User-supplied capabilities from CAPABILITIES_FILE (if any). Loaded once and
   // merged into whichever session path runs below.
   const fileCaps = loadCapabilitiesFile(config, platform);
+  const inlineCapsForPlatform = inlineCaps
+    ? normalizeCapabilitiesForPlatform(inlineCaps, platform, 'capabilities')
+    : {};
 
   if (isCloud(config)) {
-    return createCloudSession(mcp, config, platform, fileCaps);
+    return createCloudSession(mcp, config, platform, { ...inlineCapsForPlatform, ...fileCaps });
   }
 
   ui.startSpinner('Creating Appium session...');
 
   const args: Record<string, unknown> = { platform };
 
-  // Capability precedence (later wins): config defaults < CAPABILITIES_FILE <
-  // extraCaps. extraCaps (parallel ports, pinned udid) must win last so concurrent
-  // workers don't collide and device pinning holds even if the file sets the same key.
+  // Capability precedence (later wins): config defaults < inline capabilities <
+  // CAPABILITIES_FILE < extraCaps. extraCaps (parallel ports, pinned udid) must win
+  // last so concurrent workers don't collide and device pinning holds even if the
+  // file sets the same key.
   if (platform === 'android') {
-    const caps = { ...buildAndroidCapabilities(config), ...fileCaps, ...extraCaps };
+    const caps = {
+      ...buildAndroidCapabilities(config),
+      ...inlineCapsForPlatform,
+      ...fileCaps,
+      ...extraCaps,
+    };
     if (Object.keys(caps).length > 0) {
       args.capabilities = JSON.stringify(caps);
     }
@@ -69,6 +83,7 @@ export async function createPlatformSession(
     // Merge config-level APP_PATH with the caps file and extraCaps (per-flow app: overrides .env).
     const iosCaps = {
       ...(config.APP_PATH ? { 'appium:app': config.APP_PATH } : {}),
+      ...inlineCapsForPlatform,
       ...fileCaps,
       ...extraCaps,
     };
