@@ -125,6 +125,8 @@ export interface RunnerConfig<State = unknown> extends AppClawOptions {
   node?: NodeConfig;
   reporter?: string | string[];
   reportDir?: string;
+  /** Suite name shown in the console header and both HTML reports. Default: 'AppClaw Runner'. */
+  suiteName?: string;
 
   // ── lifecycle ──
   globalSetup?: (args: GlobalSetupArgs) => State | Promise<State>;
@@ -164,6 +166,7 @@ export interface ResolvedConfig<State = unknown> {
   appOptions: AppClawOptions;
   reporter: string[];
   reportDir: string;
+  suiteName: string;
   grep?: string;
   grepInvert?: string;
   shard?: { current: number; total: number };

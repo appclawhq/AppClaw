@@ -1,47 +1,51 @@
 /**
- * HTML renderer — server-side rendered pages for AppClaw flow execution reports.
+ * HTML renderer — server-side pages for the `--report` viewer.
  *
- * Produces complete HTML strings with embedded CSS and JS.
- * No build step required — pure template strings.
+ * Two entry points, one visual language (shared with the runner's per-suite
+ * report at `src/runner/suite-report.ts` — same tokens, same components, minor
+ * mode-specific tweaks):
+ *
+ *   renderIndexPage(index)   → aggregate history at `/`
+ *   renderRunPage(manifest)  → per-run Step Inspector at `/runs/:runId`
+ *
+ * Screenshots and videos are streamed from `/artifacts/…` (the server route
+ * pulls them from the base64 store in the manifest). We deliberately do NOT
+ * inline artifacts here — the server-mode page loads fast and lets the browser
+ * cache. The per-suite report keeps embedding for offline portability.
  */
 
 import type { RunIndex, RunIndexEntry, RunManifest, StepArtifact, SuiteEntry } from './types.js';
-import type { FlowPhase } from '../flow/types.js';
 
-/* ─── Helpers ────────────────────────────────────────────── */
+/* ─── shared formatting helpers ─────────────────────────────────── */
 
-function escapeHtml(str: string): string {
-  return str
+function esc(s: unknown): string {
+  return String(s ?? '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
+    .replace(/"/g, '&quot;');
 }
 
-function formatDuration(ms: number): string {
+function fmtDur(ms: number): string {
+  if (!ms) return '0s';
   if (ms < 1000) return `${ms}ms`;
   const s = ms / 1000;
   if (s < 60) return `${s.toFixed(1)}s`;
   const m = Math.floor(s / 60);
-  const rem = Math.round(s % 60);
-  return `${m}m ${rem}s`;
+  return `${m}m ${Math.round(s % 60)}s`;
 }
 
-function formatDate(iso: string): string {
-  const d = new Date(iso);
-  return d.toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+function fmtClock(ms: number): string {
+  const s = Math.round(ms / 1000);
+  const m = Math.floor(s / 60);
+  return m > 0 ? `${m}m ${String(s % 60).padStart(2, '0')}s` : `${s}s`;
 }
 
-function formatDateShort(iso: string): string {
+function fmtDate(iso: string): string {
   const d = new Date(iso);
-  return d.toLocaleDateString('en-US', {
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString(undefined, {
+    weekday: 'short',
     month: 'short',
     day: 'numeric',
     hour: '2-digit',
@@ -49,403 +53,60 @@ function formatDateShort(iso: string): string {
   });
 }
 
-function successRate(runs: RunIndexEntry[]): number {
-  if (runs.length === 0) return 0;
-  return (runs.filter((r) => r.success).length / runs.length) * 100;
+function fmtDateShort(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 }
 
-function phaseLabel(phase: FlowPhase): string {
-  switch (phase) {
-    case 'setup':
-      return 'Setup';
-    case 'test':
-      return 'Test';
-    case 'assertion':
-      return 'Assertion';
-  }
-}
-
-function stepKindLabel(kind: string): string {
-  switch (kind) {
-    case 'tap':
-      return 'Tap';
-    case 'type':
-      return 'Type';
-    case 'assert':
-      return 'Assert';
-    case 'scrollAssert':
-      return 'Scroll Assert';
-    case 'swipe':
-      return 'Swipe';
-    case 'wait':
-      return 'Wait';
-    case 'waitUntil':
-      return 'Wait Until';
-    case 'openApp':
-    case 'launchApp':
-      return 'Launch';
-    case 'back':
-      return 'Back';
-    case 'home':
-      return 'Home';
-    case 'enter':
-      return 'Enter';
-    case 'drag':
-      return 'Drag';
-    case 'getInfo':
-      return 'Get Info';
-    case 'done':
-      return 'Done';
-    default:
-      return kind;
-  }
-}
-
-/* ─── Font ───────────────────────────────────────────────── */
-
-function fontLinks(): string {
-  return `<link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,500;0,600;0,700;1,500;1,600&family=Sora:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">`;
-}
-
-/* ─── Anime.js CDN ───────────────────────────────────────── */
-
-function animeScript(): string {
-  return `<script src="https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.2/anime.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"><\/script>`;
-}
-
-/* ─── Theme Script ───────────────────────────────────────── */
-
-function themeScript(): string {
-  return `<script>
-    (function() {
-      var saved = localStorage.getItem('appclaw-theme') || 'dark';
-      document.documentElement.setAttribute('data-theme', saved);
-      updateToggle(saved);
-    })();
-    function setTheme(theme) {
-      document.documentElement.setAttribute('data-theme', theme);
-      localStorage.setItem('appclaw-theme', theme);
-      updateToggle(theme);
-    }
-    function updateToggle(theme) {
-      var light = document.getElementById('theme-light');
-      var dark = document.getElementById('theme-dark');
-      if (light) light.className = theme === 'light' ? 'active' : '';
-      if (dark) dark.className = theme === 'dark' ? 'active' : '';
-    }
-  </script>`;
-}
-
-/* ─── Shared CSS with Light/Dark Theme ───────────────────── */
-
-function sharedCss(): string {
-  return `
-    :root, [data-theme="dark"] {
-      --bg-root: #0b0c11;
-      --bg-surface: #13141c;
-      --bg-elevated: #1b1d28;
-      --bg-inset: #0b0c11;
-      --bg-hover: rgba(129, 140, 248, 0.05);
-      --bg-active: rgba(129, 140, 248, 0.1);
-
-      --accent: #818cf8;
-      --accent-dim: rgba(129, 140, 248, 0.15);
-      --accent-border: rgba(129, 140, 248, 0.3);
-      --accent-glow: rgba(129, 140, 248, 0.15);
-
-      --success: #34d399;
-      --success-dim: rgba(52, 211, 153, 0.1);
-      --success-border: rgba(52, 211, 153, 0.25);
-      --success-bg: rgba(52, 211, 153, 0.06);
-      --failure: #f87171;
-      --failure-dim: rgba(248, 113, 113, 0.1);
-      --failure-border: rgba(248, 113, 113, 0.25);
-      --failure-bg: rgba(248, 113, 113, 0.06);
-      --warning: #fbbf24;
-      --warning-dim: rgba(251, 191, 36, 0.12);
-
-      --text-primary: #f0f1f8;
-      --text-secondary: #9699b0;
-      --text-tertiary: #50546a;
-      --text-on-success: #0b0c11;
-      --text-on-failure: #0b0c11;
-
-      --border: rgba(255, 255, 255, 0.07);
-      --border-emphasis: rgba(255, 255, 255, 0.13);
-
-      --radius-sm: 8px;
-      --radius-md: 12px;
-      --radius-lg: 16px;
-      --radius-xl: 20px;
-
-      --shadow-sm: 0 1px 3px rgba(0,0,0,0.4);
-      --shadow-md: 0 4px 20px rgba(0,0,0,0.4);
-      --shadow-lg: 0 8px 40px rgba(0,0,0,0.5);
-
-      --brand-mark-bg: linear-gradient(135deg, #818cf8, #a78bfa);
-      --brand-mark-color: #0b0c11;
-      --screenshot-border: rgba(255,255,255,0.06);
-    }
-
-    [data-theme="light"] {
-      --bg-root: #f5f5f9;
-      --bg-surface: #ffffff;
-      --bg-elevated: #ebebf4;
-      --bg-inset: #eeeef6;
-      --bg-hover: rgba(99, 102, 241, 0.05);
-      --bg-active: rgba(99, 102, 241, 0.09);
-
-      --accent: #6366f1;
-      --accent-dim: rgba(99, 102, 241, 0.1);
-      --accent-border: rgba(99, 102, 241, 0.3);
-      --accent-glow: rgba(99, 102, 241, 0.1);
-
-      --success: #059669;
-      --success-dim: rgba(5, 150, 105, 0.1);
-      --success-border: rgba(5, 150, 105, 0.25);
-      --success-bg: rgba(5, 150, 105, 0.07);
-      --failure: #dc2626;
-      --failure-dim: rgba(220, 38, 38, 0.09);
-      --failure-border: rgba(220, 38, 38, 0.25);
-      --failure-bg: rgba(220, 38, 38, 0.05);
-      --warning: #d97706;
-      --warning-dim: rgba(217, 119, 6, 0.1);
-
-      --text-primary: #12131e;
-      --text-secondary: #4b4f6e;
-      --text-tertiary: #9096b4;
-      --text-on-success: #ffffff;
-      --text-on-failure: #ffffff;
-
-      --border: rgba(18, 19, 30, 0.09);
-      --border-emphasis: rgba(18, 19, 30, 0.16);
-
-      --shadow-sm: 0 1px 3px rgba(0,0,0,0.07);
-      --shadow-md: 0 4px 20px rgba(0,0,0,0.08);
-      --shadow-lg: 0 8px 40px rgba(0,0,0,0.1);
-
-      --brand-mark-bg: linear-gradient(135deg, #6366f1, #8b5cf6);
-      --brand-mark-color: #ffffff;
-      --screenshot-border: rgba(0,0,0,0.1);
-    }
-
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-    body {
-      background: var(--bg-root);
-      color: var(--text-primary);
-      font-family: 'Sora', -apple-system, BlinkMacSystemFont, sans-serif;
-      font-size: 14px;
-      line-height: 1.6;
-      -webkit-font-smoothing: antialiased;
-      -moz-osx-font-smoothing: grayscale;
-      transition: background 0.3s, color 0.3s;
-    }
-
-    .page {
-      max-width: 1600px;
-      margin: 0 auto;
-      padding: 32px 32px 64px;
-    }
-
-    a { color: var(--accent); text-decoration: none; transition: opacity 0.15s; }
-    a:hover { opacity: 0.8; }
-
-    /* ── Animations (controlled by anime.js; opacity:0 is the initial hidden state) ── */
-    .animate-in { opacity: 0; transform: translateY(10px); }
-
-    /* ── Status Pill ── */
-    .status-pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 5px 12px;
-      border-radius: 999px;
-      font-size: 12px;
-      font-weight: 700;
-      letter-spacing: 0.06em;
-      text-transform: uppercase;
-      white-space: nowrap;
-    }
-    .status-pill.success {
-      background: var(--success-dim);
-      color: var(--success);
-      border: 1px solid var(--success-border);
-    }
-    .status-pill.failure {
-      background: var(--failure-dim);
-      color: var(--failure);
-      border: 1px solid var(--failure-border);
-    }
-    .status-dot {
-      width: 6px; height: 6px;
-      border-radius: 50%;
-      flex-shrink: 0;
-    }
-    .status-dot.success { background: var(--success); }
-    .status-dot.failure { background: var(--failure); }
-
-    /* ── Brand ── */
-    .brand {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      font-family: 'Lora', Georgia, serif;
-      font-size: 20px;
-      font-weight: 600;
-      color: var(--text-primary);
-      letter-spacing: -0.01em;
-    }
-    .brand-mark {
-      width: 34px; height: 34px;
-      border-radius: 9px;
-      background: var(--brand-mark-bg);
-      display: flex; align-items: center; justify-content: center;
-      font-family: 'Sora', sans-serif;
-      font-size: 16px; font-weight: 700; color: var(--brand-mark-color);
-    }
-
-    /* ── Theme Toggle ── */
-    .theme-toggle {
-      display: flex;
-      align-items: center;
-      gap: 2px;
-      padding: 3px;
-      background: var(--bg-elevated);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
-    }
-    .theme-toggle button {
-      padding: 5px 10px;
-      border: none;
-      border-radius: 6px;
-      font-family: 'Sora', sans-serif;
-      font-size: 12px;
-      font-weight: 500;
-      cursor: pointer;
-      transition: all 0.2s;
-      background: transparent;
-      color: var(--text-tertiary);
-      display: flex;
-      align-items: center;
-      gap: 5px;
-      line-height: 1;
-    }
-    .theme-toggle button.active {
-      background: var(--accent-dim);
-      color: var(--accent);
-    }
-    .theme-toggle button:hover:not(.active) { color: var(--text-secondary); }
-
-    @media (prefers-reduced-motion: reduce) {
-      *, *::before, *::after {
-        animation-duration: 0.01ms !important;
-        transition-duration: 0.01ms !important;
-      }
-      .animate-in { opacity: 1 !important; transform: none !important; }
-    }
-  `;
-}
-
-/* ─── SVG Icons ──────────────────────────────────────────── */
-
-function iconClock(): string {
-  return '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>';
-}
-function iconArrowLeft(): string {
-  return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>';
-}
-function iconDevice(): string {
-  return '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>';
-}
 function iconAndroid(): string {
   return '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M17.532 15.106a1.003 1.003 0 1 1 .001-2.007 1.003 1.003 0 0 1 0 2.007zm-11.063 0a1.003 1.003 0 1 1 .001-2.007 1.003 1.003 0 0 1 0 2.007zm11.371-4.464 1.977-3.424a.41.41 0 0 0-.15-.56.41.41 0 0 0-.56.15L17.1 10.255a12.63 12.63 0 0 0-5.1-1.033 12.63 12.63 0 0 0-5.1 1.033L4.893 6.808a.41.41 0 0 0-.56-.15.41.41 0 0 0-.15.56l1.977 3.424C2.565 12.736.002 16.412.002 20.6h24c0-4.188-2.563-7.864-6.162-9.958z"/></svg>';
 }
 function iconApple(): string {
   return '<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>';
 }
-function iconSteps(): string {
-  return '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>';
-}
 
-/* ─── Health Summary ─────────────────────────────────────── */
-
-function healthSummary(runs: RunIndexEntry[]): { headline: string; sub: string; cls: string } {
-  if (runs.length === 0) {
-    return {
-      headline: 'No runs recorded yet',
-      sub: 'Run a YAML flow to see results here.',
-      cls: 'neutral',
-    };
-  }
-  const passed = runs.filter((r) => r.success).length;
-  const failed = runs.length - passed;
-  const latest = runs[0];
-  const latestName = latest.flowName || latest.flowFile.split('/').pop() || latest.runId;
-  const latestDate = formatDateShort(latest.startedAt);
-
-  if (failed === 0) {
-    return {
-      headline: `All ${runs.length} run${runs.length !== 1 ? 's' : ''} passed`,
-      sub: `Latest: ${latestName} — ${latestDate}`,
-      cls: 'all-passed',
-    };
-  }
-  if (passed === 0) {
-    return {
-      headline: `All ${runs.length} run${runs.length !== 1 ? 's' : ''} failed`,
-      sub: `Latest failure: ${latestName} — ${latestDate}`,
-      cls: 'all-failed',
-    };
-  }
-  return {
-    headline: `${failed} of ${runs.length} run${runs.length !== 1 ? 's' : ''} failed`,
-    sub: `${passed} passed · ${failed} need attention`,
-    cls: 'partial',
-  };
-}
-
-/* ─── Run Index Page ─────────────────────────────────────── */
-
-/* Analytics helpers */
+/* ─── analytics compute ─────────────────────────────────────────── */
 
 interface DayStats {
   date: string;
-  label: string;
   passed: number;
   failed: number;
 }
 
 function computeTrendData(runs: RunIndexEntry[], days = 14): DayStats[] {
   const now = new Date();
-  const result: DayStats[] = [];
+  const buckets: DayStats[] = [];
   for (let i = days - 1; i >= 0; i--) {
     const d = new Date(now);
     d.setDate(d.getDate() - i);
-    const dateStr = d.toISOString().slice(0, 10);
-    const label = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-    const dayRuns = runs.filter((r) => r.startedAt.slice(0, 10) === dateStr);
-    result.push({
-      date: dateStr,
-      label,
-      passed: dayRuns.filter((r) => r.success).length,
-      failed: dayRuns.filter((r) => !r.success).length,
-    });
+    const key = d.toISOString().slice(0, 10);
+    buckets.push({ date: key, passed: 0, failed: 0 });
   }
-  return result;
+  const idx = new Map(buckets.map((b, i) => [b.date, i]));
+  for (const r of runs) {
+    const key = r.startedAt.slice(0, 10);
+    const at = idx.get(key);
+    if (at == null) continue;
+    if (r.success) buckets[at].passed++;
+    else buckets[at].failed++;
+  }
+  return buckets;
 }
 
-function renderSparklineSvg(trend: DayStats[], w = 220, h = 52): string {
+function renderSparklineSvg(trend: DayStats[], w = 320, h = 60): string {
   const n = trend.length;
   if (n < 2) return `<svg width="${w}" height="${h}"></svg>`;
   const totals = trend.map((d) => d.passed + d.failed);
   const maxTotal = Math.max(1, ...totals);
   const xStep = w / (n - 1);
-  const pad = 3;
-
-  const polyPoints = (getter: (d: DayStats) => number, color: string): string => {
+  const pad = 4;
+  const poly = (getter: (d: DayStats) => number, color: string): string => {
     const pts = trend
       .map((d, i) => {
         const x = (i * xStep).toFixed(1);
@@ -453,9 +114,8 @@ function renderSparklineSvg(trend: DayStats[], w = 220, h = 52): string {
         return `${x},${y}`;
       })
       .join(' ');
-    return `<polyline points="${pts}" stroke="${color}" stroke-width="2" fill="none" stroke-linejoin="round" stroke-linecap="round" opacity="0.9"/>`;
+    return `<polyline points="${pts}" stroke="${color}" stroke-width="2" fill="none" stroke-linejoin="round" stroke-linecap="round" opacity="0.92"/>`;
   };
-
   const dots = (getter: (d: DayStats) => number, color: string): string =>
     trend
       .map((d, i) => {
@@ -463,2299 +123,1146 @@ function renderSparklineSvg(trend: DayStats[], w = 220, h = 52): string {
         if (v === 0) return '';
         const cx = (i * xStep).toFixed(1);
         const cy = (h - pad - (v / maxTotal) * (h - pad * 2)).toFixed(1);
-        return `<circle cx="${cx}" cy="${cy}" r="3" fill="${color}" opacity="0.85"/>`;
+        return `<circle cx="${cx}" cy="${cy}" r="2.6" fill="${color}" opacity="0.9"/>`;
       })
       .join('');
-
-  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" fill="none" xmlns="http://www.w3.org/2000/svg">
-    ${polyPoints((d) => d.passed, 'var(--success)')}
-    ${polyPoints((d) => d.failed, 'var(--failure)')}
-    ${dots((d) => d.passed, 'var(--success)')}
-    ${dots((d) => d.failed, 'var(--failure)')}
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" fill="none" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none" style="width:100%;height:${h}px">
+    ${poly((d) => d.passed, 'var(--pass)')}
+    ${poly((d) => d.failed, 'var(--fail)')}
+    ${dots((d) => d.passed, 'var(--pass)')}
+    ${dots((d) => d.failed, 'var(--fail)')}
   </svg>`;
 }
 
-function computeMostFailingFlows(
+function mostFailingTests(
   runs: RunIndexEntry[],
   limit = 3
 ): Array<{ name: string; failures: number; total: number }> {
-  const flowMap = new Map<string, { name: string; failures: number; total: number }>();
-  for (const run of runs) {
-    const key = run.flowFile;
-    const name = run.flowName || run.flowFile.split('/').pop() || key;
-    if (!flowMap.has(key)) flowMap.set(key, { name, failures: 0, total: 0 });
-    const entry = flowMap.get(key)!;
-    entry.total++;
-    if (!run.success) entry.failures++;
+  // Group by test identity — prefer the test title (flowName), falling back to
+  // the spec file. The historical `flowFile` is now the `'sdk-run'` stub for
+  // SDK-driven tests, so we can't use it as an identity key.
+  const map = new Map<string, { name: string; failures: number; total: number }>();
+  for (const r of runs) {
+    const name = testTitle(r);
+    const key = `${r.specFile ?? ''}::${name}`;
+    if (!map.has(key)) map.set(key, { name, failures: 0, total: 0 });
+    const e = map.get(key)!;
+    e.total++;
+    if (!r.success) e.failures++;
   }
-  return Array.from(flowMap.values())
+  return [...map.values()]
     .filter((f) => f.failures > 0)
     .sort((a, b) => b.failures - a.failures || b.total - a.total)
     .slice(0, limit);
 }
 
-function renderAnalyticsSection(runs: RunIndexEntry[]): string {
-  if (runs.length === 0) return '';
+/* ─── shared HTML pieces (head, styles, script core) ─────────────── */
 
+function head(title: string, injectedGlobals = ''): string {
+  return `<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${esc(title)}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script>(function(){try{var t=localStorage.getItem('appclaw-report-theme');if(t==='light')document.documentElement.classList.add('preload-light');}catch(e){}})();</script>
+${injectedGlobals}
+<style>${styles()}</style>`;
+}
+
+function themeToggle(): string {
+  return `<button id="theme-toggle" class="theme-toggle" onclick="toggleTheme()" aria-label="toggle light / dark theme" title="Toggle theme">☾</button>`;
+}
+
+/** Shared theme + utility script installed on every page. */
+function themeScript(): string {
+  return `
+function applyTheme(t){
+  document.body.classList.toggle('light',t==='light');
+  document.documentElement.classList.remove('preload-light');
+  var b=document.getElementById('theme-toggle'); if(b)b.textContent=t==='light'?'☀':'☾';
+  try{localStorage.setItem('appclaw-report-theme',t);}catch(e){}
+}
+function toggleTheme(){applyTheme(document.body.classList.contains('light')?'dark':'light');}
+(function(){var s;try{s=localStorage.getItem('appclaw-report-theme');}catch(e){} if(s)applyTheme(s);})();
+function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function fmt(ms){if(!ms)return'0s';if(ms<1000)return ms+'ms';var s=ms/1000;return s<60?s.toFixed(1)+'s':Math.floor(s/60)+'m '+Math.round(s%60)+'s';}
+function glyph(s){return s==='passed'?'✓':s==='failed'?'✗':'⊘';}
+`;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+ * Mode B — aggregate history at `/`
+ * ═══════════════════════════════════════════════════════════════════ */
+
+export function renderIndexPage(index: RunIndex): string {
+  const allRuns = [...index.runs].sort((a, b) => (b.startedAt < a.startedAt ? -1 : 1));
+  const suites = [...(index.suites ?? [])].sort((a, b) => (b.startedAt < a.startedAt ? -1 : 1));
+
+  // Aggregate stats derive from runs that belong to a visible SuiteEntry only —
+  // matches the fact that the page shows suites-only. Orphaned runs (a suite
+  // that crashed or was interrupted before finalizing its SuiteEntry, so its
+  // runs exist in the index but not under any suite) would otherwise skew the
+  // tiles and analytics without ever appearing in the results list.
+  const inSuite = new Set<string>();
+  for (const s of suites) for (const id of s.runIds) inSuite.add(id);
+  const runs = allRuns.filter((r) => inSuite.has(r.runId));
+
+  const passed = runs.filter((r) => r.success).length;
+  const failed = runs.length - passed;
+  const totalSteps = runs.reduce((n, r) => n + (r.stepsExecuted || 0), 0);
+  const totalWall = runs.reduce((n, r) => n + (r.durationMs || 0), 0);
+  const durationRuns = runs.filter((r) => r.durationMs > 0);
+  const avgMs =
+    durationRuns.length > 0
+      ? Math.round(durationRuns.reduce((n, r) => n + r.durationMs, 0) / durationRuns.length)
+      : 0;
+  const passRate = runs.length > 0 ? Math.round((passed / runs.length) * 100) : 100;
+  const latest = runs[0];
+  const verdict = runs.length === 0 ? 'EMPTY' : latest.success ? 'PASSED' : 'FAILED';
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+${head('AppClaw · Reports')}
+</head>
+<body>
+<div class="grain"></div>
+${themeToggle()}
+<main>
+  <header class="cockpit reveal">
+    ${renderHistoryHero({
+      verdict,
+      passRate,
+      runCount: runs.length,
+      passed,
+      failed,
+      latest,
+      avgMs,
+      stats: { total: runs.length, passed, failed, avgMs, totalSteps, totalWall },
+    })}
+    ${renderAnalytics(runs)}
+  </header>
+  <section class="dash-body reveal">
+    <aside class="dash-side">
+      ${renderDevicesSidebar(runs)}
+    </aside>
+    <div class="dash-main">
+      ${renderResults(runs, suites)}
+    </div>
+  </section>
+  ${renderFooter(index)}
+</main>
+<script>${themeScript()}</script>
+<script>window.__INDEX__=${embedJson({ generatedAt: index.generatedAt })};</script>
+<script>${historyScript()}</script>
+</body>
+</html>`;
+}
+
+function renderHistoryHero(d: {
+  verdict: string;
+  passRate: number;
+  runCount: number;
+  passed: number;
+  failed: number;
+  latest: RunIndexEntry | undefined;
+  avgMs: number;
+  stats: {
+    total: number;
+    passed: number;
+    failed: number;
+    avgMs: number;
+    totalSteps: number;
+    totalWall: number;
+  };
+}): string {
+  const R = 34;
+  const C = 2 * Math.PI * R;
+  const dash = (d.passRate / 100) * C;
+  const latestChip = d.latest
+    ? `<span class="chip">latest ${esc(fmtDateShort(d.latest.startedAt))}</span>`
+    : '';
+  const runsLabel = `${d.runCount} test${d.runCount === 1 ? '' : 's'}`;
+
+  const s = d.stats;
+  const total = Math.max(s.total, 1);
+  const cells: Array<{ label: string; value: string; tone: string; ratio: number | null }> = [
+    { label: 'tests', value: String(s.total), tone: 'neutral', ratio: null },
+    { label: 'passed', value: String(s.passed), tone: 'pass', ratio: s.passed / total },
+    {
+      label: 'failed',
+      value: String(s.failed),
+      tone: s.failed ? 'fail' : 'muted',
+      ratio: s.failed / total,
+    },
+    { label: 'avg time', value: fmtDur(s.avgMs), tone: 'neutral', ratio: null },
+    { label: 'steps', value: String(s.totalSteps), tone: 'neutral', ratio: null },
+    { label: 'wall time', value: fmtDur(s.totalWall), tone: 'neutral', ratio: null },
+  ];
+  const statCells = cells
+    .map((c) => {
+      const pct = c.ratio == null ? null : Math.round(c.ratio * 100);
+      const bar =
+        pct == null
+          ? '<span class="mstat-bar mstat-bar-static"></span>'
+          : `<span class="mstat-bar"><span class="mstat-bar-fill" style="width:${pct}%"></span></span>`;
+      return `<div class="mstat tone-${c.tone}">
+        <div class="mstat-value">${esc(c.value)}</div>
+        <div class="mstat-label">${esc(c.label)}</div>
+        ${bar}
+      </div>`;
+    })
+    .join('');
+
+  return `<div class="hero-strip">
+    <div class="hero-left">
+      <div class="brand"><span class="brand-mark">◐</span> AppClaw<span class="brand-sub">history</span></div>
+      <h1 class="suite">All Tests</h1>
+      <div class="hero-meta">
+        <span class="chip">${esc(runsLabel)}</span>
+        ${latestChip}
+        <span class="chip">avg ${esc(fmtDur(d.avgMs))}</span>
+      </div>
+    </div>
+    <div class="hero-right">
+      <div class="hero-mstats">${statCells}</div>
+      <div class="hero-summary">
+        <div class="donut" style="--dash:${dash.toFixed(1)};--circ:${C.toFixed(1)}">
+          <svg viewBox="0 0 84 84">
+            <circle class="donut-track" cx="42" cy="42" r="${R}"></circle>
+            <circle class="donut-value" cx="42" cy="42" r="${R}"></circle>
+          </svg>
+          <div class="donut-center">
+            <div class="rate">${d.passRate}<span>%</span></div>
+          </div>
+        </div>
+        <div class="verdict verdict-${d.verdict.toLowerCase()}">
+          <span class="dot"></span>${d.verdict}
+          <span class="verdict-sub">${d.passed}/${d.runCount || d.passed}</span>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderAnalytics(runs: RunIndexEntry[]): string {
+  if (runs.length === 0) return '';
   const trend = computeTrendData(runs, 14);
   const sparkline = renderSparklineSvg(trend);
 
   const androidCount = runs.filter((r) => r.platform === 'android').length;
   const iosCount = runs.filter((r) => r.platform === 'ios').length;
-  const totalPlatform = androidCount + iosCount || 1;
-  const androidPct = ((androidCount / totalPlatform) * 100).toFixed(0);
-  const iosPct = ((iosCount / totalPlatform) * 100).toFixed(0);
+  const totalPlat = androidCount + iosCount || 1;
+  const androidPct = ((androidCount / totalPlat) * 100).toFixed(0);
+  const iosPct = ((iosCount / totalPlat) * 100).toFixed(0);
 
-  const durationRuns = runs.filter((r) => r.durationMs > 0);
-  const avgDuration =
-    durationRuns.length > 0
-      ? formatDuration(
-          Math.round(durationRuns.reduce((s, r) => s + r.durationMs, 0) / durationRuns.length)
-        )
-      : '—';
-
-  const mostFailing = computeMostFailingFlows(runs);
-
-  const failingRows = mostFailing
+  const failing = mostFailingTests(runs);
+  const failingRows = failing
     .map((f) => {
-      const pct = ((f.failures / f.total) * 100).toFixed(0);
-      return `<div class="failing-flow-row">
-        <div class="failing-flow-name">${escapeHtml(f.name)}</div>
-        <div class="failing-flow-bar-wrap">
-          <div class="failing-flow-bar" style="width:${pct}%"></div>
-        </div>
-        <span class="failing-flow-count">${f.failures}/${f.total}</span>
+      const pct = Math.max(6, Math.round((f.failures / f.total) * 100));
+      return `<div class="failing-row">
+        <div class="failing-name">${esc(f.name)}</div>
+        <div class="failing-bar-wrap"><div class="failing-bar" style="width:${pct}%"></div></div>
+        <span class="failing-count">${f.failures}/${f.total}</span>
       </div>`;
     })
     .join('');
 
-  return `<section class="analytics-section animate-in" id="analytics-section">
-    <div class="analytics-card sparkline-card">
-      <div class="analytics-card-header">
-        <span class="analytics-card-label">14-Day Trend</span>
-        <div class="sparkline-legend">
-          <span class="sparkline-legend-dot" style="background:var(--success)"></span><span>Pass</span>
-          <span class="sparkline-legend-dot" style="background:var(--failure)"></span><span>Fail</span>
+  return `<div class="cockpit-rule"></div>
+  <section class="analytics">
+    <div class="ana-card ana-spark-card">
+      <div class="ana-head">
+        <span class="ana-label">14-day trend</span>
+        <div class="ana-legend">
+          <span class="ana-dot" style="background:var(--pass)"></span><span>Pass</span>
+          <span class="ana-dot" style="background:var(--fail)"></span><span>Fail</span>
         </div>
       </div>
-      <div class="sparkline-wrap" id="sparkline-wrap">${sparkline}</div>
+      <div class="ana-spark">${sparkline}</div>
     </div>
-    <div class="analytics-card">
-      <div class="analytics-card-label">Platform Split</div>
-      <div class="platform-split-labels">
+    <div class="ana-card">
+      <div class="ana-label">Platform split</div>
+      <div class="plat-labels">
         <span>${iconAndroid()} Android <strong>${androidPct}%</strong></span>
         <span>${iconApple()} iOS <strong>${iosPct}%</strong></span>
       </div>
-      <div class="platform-split-bar">
-        <div class="platform-split-android" style="width:${androidPct}%" title="Android ${androidCount}"></div>
-        <div class="platform-split-ios" style="width:${iosPct}%" title="iOS ${iosCount}"></div>
+      <div class="plat-bar" title="Android ${androidCount} · iOS ${iosCount}">
+        <div class="plat-android" style="width:${androidPct}%"></div>
+        <div class="plat-ios" style="width:${iosPct}%"></div>
       </div>
-      <div class="analytics-card-label" style="margin-top:14px">Avg Duration</div>
-      <div class="analytics-avg-dur">${escapeHtml(avgDuration)}</div>
     </div>
-    <div class="analytics-card failing-flows-card">
-      <div class="analytics-card-label">Most Failing Flows</div>
-      ${mostFailing.length === 0 ? '<div class="analytics-empty">No failures 🎉</div>' : failingRows}
+    <div class="ana-card">
+      <div class="ana-label">Most failing tests</div>
+      ${
+        failing.length === 0
+          ? '<div class="ana-empty">No failures 🎉</div>'
+          : `<div class="failing-list">${failingRows}</div>`
+      }
     </div>
   </section>`;
 }
 
-export function renderIndexPage(index: RunIndex): string {
-  const runs = index.runs;
-  const rate = successRate(runs);
-  const failed = runs.filter((r) => !r.success).length;
-
-  return `<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>AppClaw Reports</title>
-  <script>(function(){var t=localStorage.getItem('appclaw-theme')||'dark';document.documentElement.setAttribute('data-theme',t)})()</script>
-  ${fontLinks()}
-  ${animeScript()}
-  <style>
-    ${sharedCss()}
-
-    /* ── Page Header ── */
-    .page-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 24px;
-    }
-    .page-header .subtitle {
-      color: var(--text-tertiary);
-      font-size: 13px;
-      margin-top: 4px;
-      font-weight: 400;
-      letter-spacing: 0.01em;
-    }
-
-    /* ── Health Banner ── */
-    .health-banner {
-      display: flex;
-      align-items: center;
-      gap: 16px;
-      padding: 20px 24px;
-      border-radius: var(--radius-lg);
-      margin-bottom: 20px;
-      border: 1px solid;
-    }
-    .health-banner.all-passed {
-      background: var(--success-bg);
-      border-color: var(--success-border);
-    }
-    .health-banner.all-failed {
-      background: var(--failure-bg);
-      border-color: var(--failure-border);
-    }
-    .health-banner.partial {
-      background: var(--failure-bg);
-      border-color: var(--failure-border);
-    }
-    .health-banner.neutral {
-      background: var(--bg-elevated);
-      border-color: var(--border);
-    }
-    .health-icon {
-      width: 40px; height: 40px;
-      border-radius: 50%;
-      display: flex; align-items: center; justify-content: center;
-      flex-shrink: 0;
-      font-size: 20px;
-    }
-    .health-banner.all-passed .health-icon { background: var(--success-dim); color: var(--success); }
-    .health-banner.all-failed .health-icon { background: var(--failure-dim); color: var(--failure); }
-    .health-banner.partial .health-icon { background: var(--failure-dim); color: var(--failure); }
-    .health-banner.neutral .health-icon { background: var(--bg-inset); color: var(--text-tertiary); }
-    .health-headline {
-      font-family: 'Lora', Georgia, serif;
-      font-size: 18px;
-      font-weight: 600;
-      line-height: 1.2;
-    }
-    .health-banner.all-passed .health-headline { color: var(--success); }
-    .health-banner.all-failed .health-headline, .health-banner.partial .health-headline { color: var(--failure); }
-    .health-banner.neutral .health-headline { color: var(--text-primary); }
-    .health-sub {
-      font-size: 13px;
-      color: var(--text-secondary);
-      margin-top: 3px;
-    }
-
-    /* ── Stat Cards ── */
-    .stats-row {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 12px;
-      margin-bottom: 20px;
-    }
-    .stat-card {
-      padding: 18px 20px;
-      background: var(--bg-surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-lg);
-      transition: border-color 0.2s;
-    }
-    .stat-card:hover { border-color: var(--border-emphasis); }
-    .stat-label {
-      font-size: 11px;
-      font-weight: 600;
-      color: var(--text-tertiary);
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      margin-bottom: 6px;
-    }
-    .stat-value {
-      font-family: 'Lora', Georgia, serif;
-      font-size: 28px;
-      font-weight: 700;
-      color: var(--text-primary);
-      line-height: 1;
-    }
-    .stat-value.success { color: var(--success); }
-    .stat-value.failure { color: var(--failure); }
-    .stat-bar {
-      margin-top: 10px;
-      height: 3px;
-      border-radius: 3px;
-      background: var(--bg-elevated);
-      overflow: hidden;
-    }
-    .stat-bar-fill {
-      height: 100%;
-      border-radius: 3px;
-      background: var(--success);
-      transition: width 0.6s ease-out;
-    }
-    .stat-bar-fill.low { background: var(--failure); }
-    .stat-bar-fill.mid { background: var(--warning); }
-
-    /* ── Run List ── */
-    .runs-panel {
-      background: var(--bg-surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-xl);
-      overflow: hidden;
-    }
-    .runs-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 18px 24px;
-      border-bottom: 1px solid var(--border);
-    }
-    .runs-header h2 {
-      font-family: 'Lora', Georgia, serif;
-      font-size: 16px;
-      font-weight: 600;
-      color: var(--text-primary);
-    }
-    .runs-count {
-      font-size: 12px;
-      color: var(--text-tertiary);
-      padding: 3px 10px;
-      background: var(--bg-elevated);
-      border-radius: 999px;
-      font-weight: 600;
-      letter-spacing: 0.02em;
-    }
-
-    /* ── Run Row ── */
-    .run-item {
-      display: grid;
-      grid-template-columns: 3px 1fr 110px 130px 80px 100px;
-      align-items: center;
-      gap: 16px;
-      padding: 0 24px;
-      border-bottom: 1px solid var(--border);
-      cursor: pointer;
-      transition: background 0.12s;
-      text-decoration: none;
-      color: inherit;
-      min-height: 64px;
-    }
-    .run-item:hover { background: var(--bg-hover); opacity: 1; }
-    .run-item:last-child { border-bottom: none; }
-    .run-item.failed-row { background: var(--failure-bg); }
-    .run-item.failed-row:hover { background: rgba(248,113,113,0.09); }
-
-    .run-status-bar {
-      align-self: stretch;
-      width: 3px;
-      border-radius: 0;
-      flex-shrink: 0;
-    }
-    .run-status-bar.success { background: var(--success); }
-    .run-status-bar.failure { background: var(--failure); }
-
-    .run-info { min-width: 0; padding: 14px 0; }
-    .run-name {
-      font-weight: 600;
-      font-size: 14px;
-      color: var(--text-primary);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .run-file {
-      font-size: 12px;
-      color: var(--text-tertiary);
-      margin-top: 1px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      font-family: 'JetBrains Mono', monospace;
-    }
-    .run-failure-hint {
-      font-size: 12px;
-      color: var(--failure);
-      margin-top: 4px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      opacity: 0.85;
-    }
-    .run-failure-hint::before { content: "↳ "; }
-
-    .run-platform {
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-      font-size: 12px;
-      font-weight: 500;
-      color: var(--text-secondary);
-      padding: 4px 10px;
-      background: var(--bg-elevated);
-      border-radius: var(--radius-sm);
-      width: fit-content;
-    }
-
-    .run-date {
-      font-size: 13px;
-      color: var(--text-secondary);
-    }
-    .run-duration {
-      font-size: 13px;
-      color: var(--text-secondary);
-      font-family: 'JetBrains Mono', monospace;
-      font-variant-numeric: tabular-nums;
-    }
-    .run-steps-progress {
-      font-size: 12px;
-      color: var(--text-tertiary);
-      font-family: 'JetBrains Mono', monospace;
-    }
-
-    .empty-state {
-      padding: 56px 32px;
-      text-align: center;
-      color: var(--text-tertiary);
-    }
-    .empty-state p { font-size: 14px; margin-bottom: 8px; }
-    .empty-state code {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 12px;
-      padding: 2px 8px;
-      background: var(--bg-elevated);
-      border-radius: 6px;
-      color: var(--accent);
-    }
-
-    /* ── Column Headers ── */
-    .run-list-header {
-      display: grid;
-      grid-template-columns: 3px 1fr 110px 130px 80px 100px;
-      gap: 16px;
-      padding: 9px 24px;
-      background: var(--bg-inset);
-      border-bottom: 1px solid var(--border);
-    }
-    .col-label {
-      font-size: 11px;
-      font-weight: 700;
-      color: var(--text-tertiary);
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-    }
-
-    /* ── Suite Groups ── */
-    .suite-group { border-bottom: 1px solid var(--border); }
-    .suite-group:last-child { border-bottom: none; }
-
-    .suite-row {
-      display: grid;
-      grid-template-columns: 3px 1fr 110px 130px 80px 100px;
-      align-items: center;
-      gap: 16px;
-      padding: 14px 24px;
-      cursor: pointer;
-      transition: background 0.12s;
-      user-select: none;
-      background: var(--bg-inset);
-      min-height: 60px;
-    }
-    .suite-row:hover { background: var(--bg-hover); }
-
-    .suite-name {
-      font-weight: 700;
-      font-size: 14px;
-      color: var(--text-primary);
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .suite-badge {
-      font-size: 10px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      padding: 2px 7px;
-      border-radius: 999px;
-      background: var(--accent-dim);
-      color: var(--accent);
-      border: 1px solid var(--accent-border);
-    }
-    .suite-meta { font-size: 12px; color: var(--text-tertiary); margin-top: 2px; }
-    .suite-toggle {
-      color: var(--text-tertiary);
-      font-size: 11px;
-      transition: transform 0.2s;
-      display: flex; align-items: center; justify-content: center;
-    }
-    .suite-toggle.open { transform: rotate(90deg); }
-    .suite-children { display: none; }
-    .suite-children.expanded { display: block; }
-
-    .suite-child-run {
-      display: grid;
-      grid-template-columns: 3px 1fr 110px 130px 80px 100px;
-      align-items: center;
-      gap: 16px;
-      padding: 0 24px 0 44px;
-      border-top: 1px solid var(--border);
-      cursor: pointer;
-      transition: background 0.12s;
-      text-decoration: none;
-      color: inherit;
-      min-height: 56px;
-    }
-    .suite-child-run:hover { background: var(--bg-hover); opacity: 1; }
-    .suite-child-run.failed-row { background: var(--failure-bg); }
-    .suite-child-run.failed-row:hover { background: rgba(248,113,113,0.09); }
-
-    .child-run-info { min-width: 0; padding: 12px 0; }
-    .child-run-name {
-      font-weight: 500;
-      font-size: 13px;
-      color: var(--text-primary);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .child-run-device {
-      font-size: 11px;
-      color: var(--text-tertiary);
-      margin-top: 2px;
-      font-family: 'JetBrains Mono', monospace;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-
-    @media (max-width: 960px) {
-      .stats-row { grid-template-columns: repeat(2, 1fr); }
-      .run-item, .run-list-header, .suite-row, .suite-child-run {
-        grid-template-columns: 3px 1fr auto auto;
-      }
-      .run-date, .run-steps-progress, .run-duration { display: none; }
-    }
-    @media (max-width: 600px) {
-      .stats-row { grid-template-columns: 1fr 1fr; }
-      .page { padding: 16px 16px 48px; }
-    }
-
-    /* ── Analytics Section ── */
-    .analytics-section {
-      display: grid;
-      grid-template-columns: 1fr 1fr 1fr;
-      gap: 12px;
-      margin-bottom: 20px;
-    }
-    .analytics-card {
-      background: var(--bg-surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-lg);
-      padding: 18px 20px;
-      transition: border-color 0.2s;
-    }
-    .analytics-card:hover { border-color: var(--border-emphasis); }
-    .analytics-card-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 12px;
-    }
-    .analytics-card-label {
-      font-size: 11px;
-      font-weight: 700;
-      color: var(--text-tertiary);
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      margin-bottom: 10px;
-      display: block;
-    }
-    .sparkline-legend {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 11px;
-      color: var(--text-tertiary);
-    }
-    .sparkline-legend-dot {
-      width: 8px; height: 8px;
-      border-radius: 50%;
-      flex-shrink: 0;
-    }
-    .sparkline-wrap svg { width: 100%; height: 52px; overflow: visible; }
-    .platform-split-labels {
-      display: flex;
-      justify-content: space-between;
-      font-size: 12px;
-      color: var(--text-secondary);
-      margin-bottom: 8px;
-      gap: 8px;
-    }
-    .platform-split-labels strong { color: var(--text-primary); }
-    .platform-split-labels span {
-      display: flex;
-      align-items: center;
-      gap: 5px;
-    }
-    .platform-split-bar {
-      height: 8px;
-      border-radius: 999px;
-      background: var(--bg-elevated);
-      display: flex;
-      overflow: hidden;
-    }
-    .platform-split-android {
-      background: var(--accent);
-      transition: width 0.6s ease-out;
-    }
-    .platform-split-ios {
-      background: var(--accent);
-      opacity: 0.45;
-      transition: width 0.6s ease-out;
-    }
-    .analytics-avg-dur {
-      font-family: 'Lora', Georgia, serif;
-      font-size: 26px;
-      font-weight: 700;
-      color: var(--text-primary);
-      line-height: 1;
-    }
-    .failing-flow-row {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      margin-bottom: 10px;
-    }
-    .failing-flow-row:last-child { margin-bottom: 0; }
-    .failing-flow-name {
-      font-size: 12px;
-      color: var(--text-secondary);
-      min-width: 0;
-      flex: 1;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .failing-flow-bar-wrap {
-      width: 80px;
-      height: 6px;
-      background: var(--bg-elevated);
-      border-radius: 999px;
-      overflow: hidden;
-      flex-shrink: 0;
-    }
-    .failing-flow-bar {
-      height: 100%;
-      background: var(--failure);
-      opacity: 0.75;
-      border-radius: 999px;
-      transition: width 0.6s ease-out;
-    }
-    .failing-flow-count {
-      font-size: 11px;
-      font-family: 'JetBrains Mono', monospace;
-      color: var(--failure);
-      flex-shrink: 0;
-    }
-    .analytics-empty {
-      font-size: 13px;
-      color: var(--text-tertiary);
-      margin-top: 4px;
-    }
-
-    /* ── Filter Bar ── */
-    .filter-bar {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 10px 24px;
-      border-bottom: 1px solid var(--border);
-      background: var(--bg-inset);
-      flex-wrap: wrap;
-    }
-    .filter-search {
-      flex: 1;
-      min-width: 160px;
-      padding: 6px 12px;
-      background: var(--bg-surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
-      font-family: 'Sora', sans-serif;
-      font-size: 12px;
-      color: var(--text-primary);
-      outline: none;
-      transition: border-color 0.15s;
-    }
-    .filter-search::placeholder { color: var(--text-tertiary); }
-    .filter-search:focus { border-color: var(--accent-border); }
-    .filter-chip {
-      padding: 4px 12px;
-      border: 1px solid var(--border);
-      border-radius: 999px;
-      font-size: 11px;
-      font-weight: 600;
-      font-family: 'Sora', sans-serif;
-      letter-spacing: 0.03em;
-      cursor: pointer;
-      transition: all 0.15s;
-      background: transparent;
-      color: var(--text-secondary);
-    }
-    .filter-chip:hover { border-color: var(--border-emphasis); color: var(--text-primary); }
-    .filter-chip.active { background: var(--accent-dim); color: var(--accent); border-color: var(--accent-border); }
-    .filter-clear {
-      font-size: 11px;
-      color: var(--text-tertiary);
-      cursor: pointer;
-      padding: 4px 8px;
-      background: none;
-      border: none;
-      font-family: 'Sora', sans-serif;
-      transition: color 0.15s;
-    }
-    .filter-clear:hover { color: var(--text-primary); }
-    .filter-hidden { display: none !important; }
-
-    @media (max-width: 960px) { .analytics-section { grid-template-columns: 1fr; } }
-  </style>
-</head>
-<body>
-  <main class="page">
-    <!-- Header -->
-    <header class="page-header animate-in">
-      <div>
-        <div class="brand">
-          <div class="brand-mark">A</div>
-          AppClaw Reports
+function renderDevicesSidebar(runs: RunIndexEntry[]): string {
+  if (runs.length === 0) return '';
+  interface Bucket {
+    name: string;
+    platform: 'android' | 'ios';
+    passed: number;
+    failed: number;
+    count: number;
+    durationMs: number;
+  }
+  const byDev = new Map<string, Bucket>();
+  for (const r of runs) {
+    const name = r.device || '—';
+    const key = `${r.platform}:${name}`;
+    if (!byDev.has(key))
+      byDev.set(key, {
+        name,
+        platform: r.platform,
+        passed: 0,
+        failed: 0,
+        count: 0,
+        durationMs: 0,
+      });
+    const b = byDev.get(key)!;
+    b.count++;
+    b.durationMs += r.durationMs || 0;
+    if (r.success) b.passed++;
+    else b.failed++;
+  }
+  const rows = [...byDev.values()]
+    .sort((a, b) => b.count - a.count)
+    .map((b) => {
+      const passPct = b.count > 0 ? Math.round((b.passed / b.count) * 100) : 0;
+      return `<div class="sidedev">
+        <div class="sidedev-head">
+          <span class="sidedev-plat">${b.platform === 'ios' ? iconApple() : iconAndroid()}</span>
+          <span class="sidedev-name">${esc(b.name)}</span>
+          <span class="sidedev-count">${b.count}</span>
         </div>
-        <p class="subtitle">Flow execution history</p>
-      </div>
-      <div class="theme-toggle" id="theme-toggle">
-        <button id="theme-light" onclick="setTheme('light')">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
-          Light
-        </button>
-        <button id="theme-dark" onclick="setTheme('dark')">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-          Dark
-        </button>
-      </div>
-    </header>
-
-    <!-- Health Banner -->
-    ${(() => {
-      const h = healthSummary(runs);
-      const icon =
-        h.cls === 'all-passed'
-          ? '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>'
-          : h.cls === 'neutral'
-            ? '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>'
-            : '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
-      return `<div class="health-banner ${h.cls} animate-in animate-in-1">
-        <div class="health-icon">${icon}</div>
-        <div>
-          <div class="health-headline">${escapeHtml(h.headline)}</div>
-          <div class="health-sub">${escapeHtml(h.sub)}</div>
+        <div class="sidedev-bar" title="${b.passed} passed · ${b.failed} failed">
+          <span class="sidedev-bar-pass" style="width:${passPct}%"></span>
+        </div>
+        <div class="sidedev-stats">
+          <span class="pass">${b.passed}✓</span>
+          ${b.failed ? `<span class="fail">${b.failed}✗</span>` : '<span class="faint">0✗</span>'}
+          <span class="faint sidedev-dur">${esc(fmtDur(b.durationMs))}</span>
         </div>
       </div>`;
-    })()}
-
-    <!-- Stats -->
-    <section class="stats-row animate-in" id="stats-row">
-      <div class="stat-card">
-        <div class="stat-label">Total Runs</div>
-        <div class="stat-value">${runs.length}</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Pass Rate</div>
-        <div class="stat-value ${rate >= 80 ? 'success' : rate >= 50 ? '' : 'failure'}">${rate.toFixed(0)}%</div>
-        <div class="stat-bar">
-          <div class="stat-bar-fill ${rate >= 80 ? '' : rate >= 50 ? 'mid' : 'low'}" style="width:${rate.toFixed(0)}%"></div>
-        </div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Passed</div>
-        <div class="stat-value success">${runs.filter((r) => r.success).length}</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Failed</div>
-        <div class="stat-value ${failed > 0 ? 'failure' : ''}">${failed}</div>
-      </div>
-    </section>
-
-    <!-- Analytics -->
-    ${renderAnalyticsSection(runs)}
-
-    <!-- Run List -->
-    <section class="runs-panel animate-in" id="runs-panel">
-      <div class="runs-header">
-        <h2>Run History</h2>
-        <span class="runs-count" id="runs-count">${runs.length} run${runs.length !== 1 ? 's' : ''}</span>
-      </div>
-      ${
-        runs.length === 0
-          ? `<div class="empty-state">
-            <p>No flow runs recorded yet.</p>
-            <p>Run a YAML flow with <code>appclaw --flow</code> to get started.</p>
-          </div>`
-          : `<div class="filter-bar" id="filter-bar">
-            <input class="filter-search" id="filter-search" type="search" placeholder="Search flows…" oninput="applyFilters()" autocomplete="off">
-            <button class="filter-chip" id="chip-passed" onclick="toggleChip('passed')">✓ Passed</button>
-            <button class="filter-chip" id="chip-failed" onclick="toggleChip('failed')">✗ Failed</button>
-            <button class="filter-chip" id="chip-android" onclick="toggleChip('android')">${iconAndroid()} Android</button>
-            <button class="filter-chip" id="chip-ios" onclick="toggleChip('ios')">${iconApple()} iOS</button>
-            <button class="filter-clear" id="filter-clear" onclick="clearFilters()" style="display:none">Clear</button>
-          </div>
-          <div class="run-list-header" id="run-list-header">
-            <span></span>
-            <span class="col-label">Flow</span>
-            <span class="col-label">Platform</span>
-            <span class="col-label">Date</span>
-            <span class="col-label">Duration</span>
-            <span class="col-label">Status</span>
-          </div>
-          <div id="run-list-body">
-          ${renderRunList(runs, index.suites ?? [])}
-          </div>`
-      }
-    </section>
-  </main>
-  <script>
-    var _knownRunCount = ${runs.length};
-
-    /* ── Suite toggle ── */
-    function toggleSuite(suiteId) {
-      var children = document.getElementById('suite-children-' + suiteId);
-      var toggle = document.getElementById('suite-toggle-' + suiteId);
-      var expanded = children.classList.contains('expanded');
-      if (expanded) {
-        children.classList.remove('expanded');
-        toggle.classList.remove('open');
-      } else {
-        children.classList.add('expanded');
-        toggle.classList.add('open');
-      }
-    }
-
-    /* ── Filter logic ── */
-    var _activeChips = {};
-
-    function toggleChip(id) {
-      _activeChips[id] = !_activeChips[id];
-      var el = document.getElementById('chip-' + id);
-      if (el) el.classList.toggle('active', !!_activeChips[id]);
-      updateClearBtn();
-      applyFilters();
-    }
-
-    function clearFilters() {
-      _activeChips = {};
-      ['passed','failed','android','ios'].forEach(function(id) {
-        var el = document.getElementById('chip-' + id);
-        if (el) el.classList.remove('active');
-      });
-      var s = document.getElementById('filter-search');
-      if (s) s.value = '';
-      updateClearBtn();
-      applyFilters();
-    }
-
-    function updateClearBtn() {
-      var hasChips = Object.values(_activeChips).some(Boolean);
-      var hasText = (document.getElementById('filter-search') || {}).value;
-      var btn = document.getElementById('filter-clear');
-      if (btn) btn.style.display = (hasChips || hasText) ? '' : 'none';
-    }
-
-    function applyFilters() {
-      updateClearBtn();
-      var q = ((document.getElementById('filter-search') || {}).value || '').toLowerCase().trim();
-      var filterPassed = _activeChips['passed'];
-      var filterFailed = _activeChips['failed'];
-      var filterAndroid = _activeChips['android'];
-      var filterIos = _activeChips['ios'];
-
-      /* items are .run-item, .suite-child-run, or .suite-group */
-      var items = document.querySelectorAll('.run-item, .suite-child-run');
-      var suiteGroups = document.querySelectorAll('.suite-group');
-      var visible = 0;
-
-      items.forEach(function(el) {
-        var name = (el.querySelector('.run-name, .child-run-name') || {}).textContent || '';
-        var file = (el.querySelector('.run-file, .child-run-device') || {}).textContent || '';
-        var platform = (el.querySelector('.run-platform') || {}).textContent || '';
-        var success = el.classList.contains('failed-row') === false;
-
-        var matchText = !q || name.toLowerCase().includes(q) || file.toLowerCase().includes(q);
-        var matchStatus = (!filterPassed && !filterFailed) || (filterPassed && success) || (filterFailed && !success);
-        var matchPlat = (!filterAndroid && !filterIos)
-          || (filterAndroid && platform.toLowerCase().includes('android'))
-          || (filterIos && platform.toLowerCase().includes('ios'));
-
-        var show = matchText && matchStatus && matchPlat;
-        el.classList.toggle('filter-hidden', !show);
-        if (show) visible++;
-      });
-
-      /* hide suite rows where all children are hidden */
-      suiteGroups.forEach(function(g) {
-        var children = g.querySelectorAll('.suite-child-run');
-        var anyVisible = Array.from(children).some(function(c) { return !c.classList.contains('filter-hidden'); });
-        var suiteRow = g.querySelector('.suite-row');
-        if (suiteRow) suiteRow.classList.toggle('filter-hidden', !anyVisible);
-      });
-
-      /* standalone run-items visible count */
-      var standaloneVisible = document.querySelectorAll('.run-item:not(.filter-hidden)').length;
-      var suiteVisible = Array.from(suiteGroups).filter(function(g) {
-        return !g.querySelector('.suite-row.filter-hidden');
-      }).length;
-      var totalVisible = standaloneVisible + suiteVisible;
-      var countEl = document.getElementById('runs-count');
-      if (countEl) countEl.textContent = totalVisible + ' run' + (totalVisible !== 1 ? 's' : '');
-
-      var header = document.getElementById('run-list-header');
-      if (header) header.style.display = totalVisible === 0 ? 'none' : '';
-    }
-
-    /* ── Auto-refresh (poll every 5 s, reload if new runs appear; pauses when tab is hidden) ── */
-    setInterval(function() {
-      if (document.visibilityState === 'hidden') return;
-      fetch('/api/runs').then(function(r) { return r.json(); }).then(function(data) {
-        if (data && data.runs && data.runs.length !== _knownRunCount) {
-          location.reload();
-        }
-      }).catch(function() { /* offline / server down — ignore */ });
-    }, 5000);
-
-    /* ── anime.js entrance animations ── */
-    window.addEventListener('DOMContentLoaded', function() {
-      if (typeof anime === 'undefined') {
-        /* Fallback if CDN unreachable: just reveal all elements */
-        document.querySelectorAll('.animate-in').forEach(function(el) {
-          el.style.opacity = '1';
-          el.style.transform = 'none';
-        });
-        return;
-      }
-
-      /* Respect prefers-reduced-motion */
-      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-        document.querySelectorAll('.animate-in').forEach(function(el) {
-          el.style.opacity = '1';
-          el.style.transform = 'none';
-        });
-        return;
-      }
-
-      anime.timeline({ easing: 'easeOutQuart', duration: 420 })
-        .add({ targets: '.page-header', opacity: [0, 1], translateY: [-10, 0] })
-        .add({ targets: '.health-banner', opacity: [0, 1], translateY: [-10, 0], duration: 380 }, '-=240')
-        .add({ targets: '.stat-card', opacity: [0, 1], translateY: [-8, 0], duration: 320, delay: anime.stagger(55) }, '-=260')
-        .add({ targets: '#analytics-section', opacity: [0, 1], translateY: [-8, 0], duration: 340 }, '-=180')
-        .add({ targets: '#runs-panel', opacity: [0, 1], translateY: [-8, 0], duration: 340 }, '-=220')
-        .add({ targets: '.run-item, .suite-row', opacity: [0, 1], translateX: [-6, 0], duration: 220, delay: anime.stagger(18) }, '-=260');
-    });
-  </script>
-  ${themeScript()}
-</body>
-</html>`;
+    })
+    .join('');
+  return `<section class="dash-card">
+    <h2 class="side-title">Devices <span class="count">${byDev.size}</span></h2>
+    <div class="sidedev-list">${rows}</div>
+  </section>`;
 }
 
-/** Build the ordered display list — suite groups first, then standalone runs, maintaining recency order. */
-function renderRunList(runs: RunIndexEntry[], suites: SuiteEntry[]): string {
-  const suiteMap = new Map<string, SuiteEntry>(suites.map((s) => [s.suiteId, s]));
-  const seenSuiteIds = new Set<string>();
-  const html: string[] = [];
-
-  for (const run of runs) {
-    if (run.suiteId) {
-      if (!seenSuiteIds.has(run.suiteId)) {
-        seenSuiteIds.add(run.suiteId);
-        const childRuns = runs.filter((r) => r.suiteId === run.suiteId);
-        const suite = suiteMap.get(run.suiteId);
-        html.push(renderSuiteGroup(run.suiteId, run.suiteName, suite, childRuns));
-      }
-      // else already rendered as part of a group
-    } else {
-      html.push(renderRunRow(run));
-    }
+function testTitle(r: RunIndexEntry): string {
+  // For SDK-driven runs `flowFile` is the stub `'sdk-run'`; only fall back to
+  // it (or a filename tail) if there's no explicit test name recorded.
+  if (r.flowName) return r.flowName;
+  if (r.flowFile && r.flowFile !== 'sdk-run') {
+    return r.flowFile.split('/').pop() || r.flowFile;
   }
-
-  return html.join('');
+  return r.runId;
 }
 
-function renderSuiteGroup(
-  suiteId: string,
-  suiteName: string | undefined,
-  suite: SuiteEntry | undefined,
-  childRuns: RunIndexEntry[]
-): string {
-  const allPassed = childRuns.every((r) => r.success);
-  const cls = allPassed ? 'success' : 'failure';
-  const platform = suite?.platform ?? childRuns[0]?.platform ?? 'android';
-  const platformIcon = platform === 'ios' ? iconApple() : iconAndroid();
-  const startedAt = suite?.startedAt ?? childRuns[0]?.startedAt ?? '';
-  const durationMs = suite?.durationMs ?? childRuns.reduce((s, r) => s + r.durationMs, 0);
-  const passedCount = suite?.passedCount ?? childRuns.filter((r) => r.success).length;
-  const totalCount = childRuns.length;
-  const displayName = suiteName ?? 'Suite';
-  const escapedSuiteId = escapeHtml(suiteId);
-  const statusLabel = allPassed
-    ? `All ${passedCount} passed`
-    : `${passedCount}/${totalCount} passed`;
-  const statusCls = allPassed ? 'success' : 'failure';
+function renderResults(runs: RunIndexEntry[], suites: SuiteEntry[]): string {
+  const runById = new Map(runs.map((r) => [r.runId, r]));
 
-  return `
-    <div class="suite-group">
-      <div class="suite-row" onclick="toggleSuite('${escapedSuiteId}')">
-        <div class="run-status-bar ${cls}"></div>
-        <div>
-          <div class="suite-name">${escapeHtml(displayName)} <span class="suite-badge">Suite</span></div>
-          <div class="suite-meta">${totalCount} flow${totalCount !== 1 ? 's' : ''}</div>
+  // Each suite renders as a single clickable row that links to its own page —
+  // the self-contained HTML the runner already wrote. Cmd/Ctrl-click opens in a
+  // new tab; the aggregate page stays a lightweight overview.
+  const suiteRows = suites
+    .map((s) => {
+      const kids = s.runIds.map((id) => runById.get(id)).filter((r): r is RunIndexEntry => !!r);
+      const total = kids.length;
+      const failed = kids.filter((r) => !r.success).length;
+      const name = s.suiteName || s.suiteId;
+      const status = failed > 0 ? 'failed' : 'passed';
+      const glyph = failed > 0 ? '✗' : '✓';
+      const failLabel = failed > 0 ? `${failed} failed` : total === 0 ? 'no runs' : 'all passed';
+      const badgeCls = failed > 0 ? 'has-fail' : 'all-pass';
+      const searchable = `${name} ${s.suiteId}`;
+      return `<a class="test suite-row status-${status}" href="/suites/${esc(s.suiteId)}"
+         data-status="${status}"
+         data-platform="${esc(s.platform)}"
+         data-title="${esc(searchable.toLowerCase())}">
+        <span class="status-glyph s-${status}">${glyph}</span>
+        <span class="test-title">${esc(name)}</span>
+        <span class="test-tags">
+          <span class="tag ${badgeCls}">${failLabel}</span>
+          <span class="tag tag-plat plat-${esc(s.platform)}">${s.platform === 'ios' ? iconApple() : iconAndroid()} ${esc(s.platform)}</span>
+          <span class="tag tag-time">${esc(fmtDur(s.durationMs || 0))}</span>
+          <span class="tag tag-when">${esc(fmtDateShort(s.startedAt))}</span>
+        </span>
+        <span class="chevron">›</span>
+      </a>`;
+    })
+    .join('');
+  const suiteGroups = suites.length
+    ? `<div class="file-group">
+        <div class="file-head">
+          <span class="file-icon">›</span>
+          <span class="file-path">Suites</span>
+          <span class="file-badge all-pass">${suites.length} total</span>
+          <span class="file-count">${suites.length}</span>
         </div>
-        <span class="run-platform">${platformIcon} ${escapeHtml(platform)}</span>
-        <span class="run-date">${startedAt ? escapeHtml(formatDateShort(startedAt)) : '—'}</span>
-        <span class="run-duration">${escapeHtml(formatDuration(durationMs))}</span>
-        <div style="display:flex;align-items:center;gap:8px;justify-content:flex-start">
-          <span class="status-pill ${statusCls}"><span class="status-dot ${statusCls}"></span>${escapeHtml(statusLabel)}</span>
-          <span class="suite-toggle" id="suite-toggle-${escapedSuiteId}">▶</span>
-        </div>
-      </div>
-      <div class="suite-children" id="suite-children-${escapedSuiteId}">
-        ${childRuns.map(renderChildRunRow).join('')}
-      </div>
-    </div>`;
-}
-
-function renderChildRunRow(run: RunIndexEntry): string {
-  const name = run.flowName || run.flowFile.split('/').pop() || run.runId;
-  const cls = run.success ? 'success' : 'failure';
-  const failedCls = !run.success ? ' failed-row' : '';
-  const platformIcon = run.platform === 'ios' ? iconApple() : iconAndroid();
-  const failureHint =
-    !run.success && run.device
-      ? `<div class="run-failure-hint">Failed on ${escapeHtml(run.device)}</div>`
-      : '';
-  return `
-    <a class="suite-child-run${failedCls}" href="/runs/${escapeHtml(run.runId)}">
-      <div class="run-status-bar ${cls}"></div>
-      <div class="child-run-info">
-        <div class="child-run-name">${escapeHtml(name)}</div>
-        <div class="child-run-device">${run.device ? escapeHtml(run.device) : escapeHtml(run.flowFile.split('/').pop() || run.flowFile)}</div>
-        ${failureHint}
-      </div>
-      <span class="run-platform">${platformIcon} ${escapeHtml(run.platform)}</span>
-      <span class="run-date">${escapeHtml(formatDateShort(run.startedAt))}</span>
-      <span class="run-duration">${escapeHtml(formatDuration(run.durationMs))}</span>
-      ${renderStatusPill(run.success)}
-    </a>`;
-}
-
-function renderRunRow(run: RunIndexEntry): string {
-  const name = run.flowName || run.flowFile.split('/').pop() || run.runId;
-  const cls = run.success ? 'success' : 'failure';
-  const failedCls = !run.success ? ' failed-row' : '';
-  const platformIcon = run.platform === 'ios' ? iconApple() : iconAndroid();
-  const failureHint = !run.success
-    ? `<div class="run-failure-hint">Failed at step ${run.stepsExecuted} of ${run.stepsTotal}${run.failedPhase ? ` (${run.failedPhase})` : ''}</div>`
+        ${suiteRows}
+      </div>`
     : '';
-  return `
-    <a class="run-item${failedCls}" href="/runs/${escapeHtml(run.runId)}">
-      <div class="run-status-bar ${cls}"></div>
-      <div class="run-info">
-        <div class="run-name">${escapeHtml(name)}</div>
-        <div class="run-file">${escapeHtml(run.device || run.flowFile)}</div>
-        ${failureHint}
+
+  return `<section class="results dash-card">
+    <div class="results-head">
+      <h2 class="section-title">Suites <span class="count" id="visible-count">${suites.length}</span></h2>
+      <div class="controls">
+        <input id="search" class="search" type="search" placeholder="filter suites…" autocomplete="off">
+        <div class="filters" role="tablist">
+          <button class="filter active" data-filter="all">All</button>
+          <button class="filter" data-filter="failed">Failed</button>
+          <button class="filter" data-filter="passed">Passed</button>
+        </div>
+        <div class="filters">
+          <button class="filter-chip active" data-plat="all">All</button>
+          <button class="filter-chip" data-plat="android">${iconAndroid()} Android</button>
+          <button class="filter-chip" data-plat="ios">${iconApple()} iOS</button>
+        </div>
+        <button id="clear-filters" class="filter-clear" onclick="clearFilters()">Clear</button>
       </div>
-      <span class="run-platform">${platformIcon} ${escapeHtml(run.platform)}</span>
-      <span class="run-date">${escapeHtml(formatDateShort(run.startedAt))}</span>
-      <span class="run-duration">${escapeHtml(formatDuration(run.durationMs))}</span>
-      ${renderStatusPill(run.success)}
-    </a>`;
+    </div>
+    <div id="groups">
+      ${suiteGroups}
+      ${
+        suites.length === 0
+          ? '<div class="empty">No suites yet — run your suite with the AppClaw runner to see results here.</div>'
+          : ''
+      }
+    </div>
+    <div id="empty" class="empty" hidden>No tests match.</div>
+  </section>`;
 }
 
-function renderStatusPill(success: boolean): string {
-  const cls = success ? 'success' : 'failure';
-  const label = success ? 'Passed' : 'Failed';
-  return `<span class="status-pill ${cls}"><span class="status-dot ${cls}"></span>${label}</span>`;
+function renderFooter(index: RunIndex): string {
+  return `<footer class="footer reveal">
+    <div class="footer-left">Generated by <strong>AppClaw</strong> · index <code>${esc(index.generatedAt)}</code></div>
+    <div class="footer-right">history report</div>
+  </footer>`;
 }
 
-/* ─── Run Detail Page ────────────────────────────────────── */
+/** Filter + auto-refresh script for the history page. */
+function historyScript(): string {
+  return `
+// ── filter + search ──
+var state={q:'',status:'all',plat:'all'};
+function apply(){
+  var visible=0;
+  document.querySelectorAll('.test').forEach(function(t){
+    var s=t.dataset.status||'', p=t.dataset.platform||'', title=t.dataset.title||'';
+    var okS=state.status==='all'||s===state.status;
+    var okP=state.plat==='all'||p===state.plat;
+    var okQ=!state.q||title.indexOf(state.q)>-1;
+    var show=okS&&okP&&okQ;
+    t.style.display=show?'':'none'; if(show)visible++;
+  });
+  document.querySelectorAll('.file-group').forEach(function(g){
+    var vis=[].some.call(g.querySelectorAll('.test'),function(t){return t.style.display!=='none';});
+    g.style.display=vis?'':'none';
+  });
+  var c=document.getElementById('visible-count'); if(c)c.textContent=visible;
+  var e=document.getElementById('empty'); if(e)e.hidden=visible!==0;
+}
+function clearFilters(){
+  state={q:'',status:'all',plat:'all'};
+  var s=document.getElementById('search'); if(s)s.value='';
+  document.querySelectorAll('.filter').forEach(function(x){x.classList.toggle('active',x.dataset.filter==='all');});
+  document.querySelectorAll('.filter-chip').forEach(function(x){x.classList.toggle('active',x.dataset.plat==='all');});
+  apply();
+}
+document.querySelectorAll('.filter').forEach(function(b){
+  b.addEventListener('click',function(){
+    document.querySelectorAll('.filter').forEach(function(x){x.classList.remove('active');});
+    b.classList.add('active'); state.status=b.dataset.filter; apply();
+  });
+});
+document.querySelectorAll('.filter-chip').forEach(function(b){
+  b.addEventListener('click',function(){
+    document.querySelectorAll('.filter-chip').forEach(function(x){x.classList.remove('active');});
+    b.classList.add('active'); state.plat=b.dataset.plat; apply();
+  });
+});
+var sInp=document.getElementById('search');
+if(sInp)sInp.addEventListener('input',function(){state.q=sInp.value.trim().toLowerCase();apply();});
+
+
+// ── auto-refresh (server-mode only) ──
+(function(){
+  if(!/^https?:$/.test(location.protocol))return; // no polling for file:// previews
+  var lastGen=(window.__INDEX__||{}).generatedAt||'';
+  setInterval(function(){
+    if(document.hidden)return;
+    fetch('/api/runs').then(function(r){return r.ok?r.json():null;}).then(function(idx){
+      if(!idx||!idx.generatedAt)return;
+      if(idx.generatedAt!==lastGen){lastGen=idx.generatedAt; location.reload();}
+    }).catch(function(){});
+  },5000);
+})();
+`;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+ * Mode C — per-run Step Inspector at `/runs/:runId`
+ * ═══════════════════════════════════════════════════════════════════ */
+
+interface ClientStep {
+  n: number;
+  kind: string;
+  desc: string;
+  status: string;
+  durationMs: number;
+  message?: string;
+  phase?: string;
+  img?: string;
+  offsetMs?: number;
+  tap?: { x: number; y: number; w?: number; h?: number };
+}
+
+function stepDescription(s: StepArtifact): string {
+  return s.verbatim || s.target || s.message || s.kind;
+}
+
+function buildRunData(manifest: RunManifest): {
+  runId: string;
+  title: string;
+  file: string;
+  specFile?: string;
+  device: string;
+  os?: string;
+  status: string;
+  durationMs: number;
+  error?: string;
+  video?: string;
+  mcpLog?: string;
+  steps: ClientStep[];
+} {
+  const steps: ClientStep[] = (manifest.steps ?? []).map((s, i) => {
+    const rel = s.beforeScreenshotPath ?? s.screenshotPath;
+    const img = rel ? `/artifacts/${manifest.runId}/${rel}` : undefined;
+    return {
+      n: i + 1,
+      kind: s.kind,
+      desc: stepDescription(s),
+      status: s.status,
+      durationMs: s.durationMs,
+      message: s.message,
+      phase: s.phase,
+      img,
+      offsetMs: s.videoOffsetMs,
+      tap: s.tapCoordinates
+        ? {
+            x: s.tapCoordinates.x,
+            y: s.tapCoordinates.y,
+            w: s.deviceScreenSize?.width ?? s.screenshotSize?.width,
+            h: s.deviceScreenSize?.height ?? s.screenshotSize?.height,
+          }
+        : undefined,
+    };
+  });
+  const video = manifest.videoPath
+    ? `/artifacts/${manifest.runId}/${manifest.videoPath}`
+    : undefined;
+  const rawFile = manifest.flowFile;
+  return {
+    runId: manifest.runId,
+    title:
+      manifest.meta?.name ||
+      (rawFile !== 'sdk-run' ? rawFile.split('/').pop() : undefined) ||
+      manifest.runId,
+    file: rawFile === 'sdk-run' ? '' : rawFile,
+    specFile: manifest.specFile,
+    device: manifest.device || '—',
+    os: manifest.deviceVersion,
+    status: manifest.success ? 'passed' : 'failed',
+    durationMs: manifest.durationMs,
+    error: manifest.reason,
+    video,
+    mcpLog: manifest.failureLogs?.appiumMcp,
+    steps,
+  };
+}
 
 export function renderRunPage(manifest: RunManifest): string {
-  const name = manifest.meta.name || manifest.flowFile.split('/').pop() || manifest.runId;
-  const hasPhases = manifest.phaseResults && manifest.phaseResults.length > 0;
-  const platformIcon = manifest.platform === 'ios' ? iconApple() : iconAndroid();
+  const data = buildRunData(manifest);
+  const verdict = data.status === 'failed' ? 'FAILED' : 'PASSED';
+  const passRate = data.status === 'passed' ? 100 : 0;
+  const R = 52;
+  const C = 2 * Math.PI * R;
+  const dash = (passRate / 100) * C;
+  const platIcon = manifest.platform === 'ios' ? iconApple() : iconAndroid();
+  const failedStep = data.steps.find((s) => s.status === 'failed');
+  const jumpToFail =
+    failedStep && verdict === 'FAILED'
+      ? `<a class="chip chip-fail" href="#step-${failedStep.n}" onclick="selectStep(${failedStep.n - 1});return false;">↓ jump to failure</a>`
+      : '';
 
-  return `<!doctype html>
+  const showFileChip = !!data.file;
+  const specChip = data.specFile ? `<span class="chip chip-spec">${esc(data.specFile)}</span>` : '';
+  return `<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>${escapeHtml(name)} — AppClaw Report</title>
-  <script>(function(){var t=localStorage.getItem('appclaw-theme')||'dark';document.documentElement.setAttribute('data-theme',t)})()</script>
-  ${fontLinks()}
-  ${animeScript()}
-  <style>
-    ${sharedCss()}
-
-    /* ── Run Header ── */
-    .run-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 20px;
-      margin-bottom: 20px;
-    }
-    .run-header-left {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      min-width: 0;
-    }
-    .back-btn {
-      width: 34px; height: 34px;
-      display: inline-flex; align-items: center; justify-content: center;
-      border-radius: var(--radius-md);
-      background: var(--bg-elevated);
-      border: 1px solid var(--border);
-      color: var(--text-secondary);
-      transition: all 0.15s;
-      flex-shrink: 0;
-    }
-    .back-btn:hover {
-      border-color: var(--accent-border);
-      color: var(--accent);
-      background: var(--accent-dim);
-    }
-    .run-title {
-      font-family: 'Lora', Georgia, serif;
-      font-size: 22px;
-      font-weight: 600;
-      color: var(--text-primary);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .run-id-label {
-      font-size: 12px;
-      color: var(--text-tertiary);
-      font-family: 'JetBrains Mono', monospace;
-      margin-top: 2px;
-    }
-
-    /* ── Status Hero ── */
-    .status-hero {
-      border-radius: var(--radius-lg);
-      padding: 20px 24px;
-      margin-bottom: 16px;
-      border: 1px solid;
-      display: flex;
-      align-items: flex-start;
-      gap: 16px;
-    }
-    .status-hero.passed {
-      background: var(--success-bg);
-      border-color: var(--success-border);
-    }
-    .status-hero.failed {
-      background: var(--failure-bg);
-      border-color: var(--failure-border);
-    }
-    .status-hero-icon {
-      width: 44px; height: 44px;
-      border-radius: 50%;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 20px;
-      flex-shrink: 0;
-    }
-    .status-hero.passed .status-hero-icon { background: var(--success-dim); color: var(--success); }
-    .status-hero.failed .status-hero-icon { background: var(--failure-dim); color: var(--failure); }
-    .status-hero-verdict {
-      font-family: 'Lora', Georgia, serif;
-      font-size: 20px;
-      font-weight: 700;
-      line-height: 1.1;
-    }
-    .status-hero.passed .status-hero-verdict { color: var(--success); }
-    .status-hero.failed .status-hero-verdict { color: var(--failure); }
-    .status-hero-reason {
-      font-size: 14px;
-      color: var(--text-secondary);
-      margin-top: 6px;
-      line-height: 1.5;
-    }
-    .status-hero-reason strong {
-      color: var(--text-primary);
-      font-weight: 600;
-    }
-    .status-hero-meta {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 14px;
-      margin-top: 10px;
-      font-size: 13px;
-      color: var(--text-tertiary);
-    }
-    .status-hero-meta span {
-      display: flex;
-      align-items: center;
-      gap: 5px;
-    }
-    .status-hero-meta strong { color: var(--text-secondary); font-weight: 500; }
-
-    /* ── Phase Track ── */
-    .phase-track {
-      display: flex;
-      gap: 4px;
-      margin-bottom: 16px;
-    }
-    .phase-seg {
-      flex: 1;
-      padding: 10px 14px;
-      border-radius: var(--radius-md);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-      border: 1px solid;
-    }
-    .phase-seg.passed { background: var(--success-bg); border-color: var(--success-border); }
-    .phase-seg.failed { background: var(--failure-bg); border-color: var(--failure-border); }
-    .phase-name {
-      font-size: 11px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.07em;
-    }
-    .phase-seg.passed .phase-name { color: var(--success); }
-    .phase-seg.failed .phase-name { color: var(--failure); }
-    .phase-steps {
-      font-size: 11px;
-      color: var(--text-tertiary);
-      font-family: 'JetBrains Mono', monospace;
-    }
-
-    /* ── Workspace Layout ── */
-    .workspace {
-      display: grid;
-      grid-template-columns: 340px 1fr;
-      gap: 14px;
-      min-height: 580px;
-    }
-
-    /* ── Timeline Panel ── */
-    .timeline {
-      background: var(--bg-surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-xl);
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-    }
-    .timeline-header {
-      padding: 14px 16px;
-      border-bottom: 1px solid var(--border);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-    .timeline-header h3 {
-      font-size: 11px;
-      font-weight: 700;
-      color: var(--text-tertiary);
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-    }
-    .timeline-scroll {
-      flex: 1;
-      overflow-y: auto;
-      padding: 6px;
-    }
-    .timeline-scroll::-webkit-scrollbar { width: 4px; }
-    .timeline-scroll::-webkit-scrollbar-track { background: transparent; }
-    .timeline-scroll::-webkit-scrollbar-thumb { background: var(--border-emphasis); border-radius: 4px; }
-
-    /* Phase divider in timeline */
-    .phase-divider {
-      padding: 10px 10px 5px;
-      font-size: 10px;
-      font-weight: 700;
-      color: var(--accent);
-      text-transform: uppercase;
-      letter-spacing: 0.1em;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .phase-divider::after {
-      content: '';
-      flex: 1;
-      height: 1px;
-      background: var(--border);
-    }
-
-    /* Step item */
-    .step-item {
-      width: 100%;
-      padding: 9px 10px;
-      border: 1px solid transparent;
-      border-radius: var(--radius-sm);
-      background: transparent;
-      cursor: pointer;
-      transition: all 0.1s;
-      font-family: inherit;
-      font-size: inherit;
-      color: inherit;
-      text-align: left;
-      display: block;
-      margin-bottom: 1px;
-    }
-    .step-item:hover { background: var(--bg-hover); border-color: var(--border); }
-    .step-item.selected { background: var(--bg-active); border-color: var(--accent-border); }
-    .step-item.video-active { background: var(--accent-dim); border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
-    .step-item.failed-step { background: var(--failure-bg); border-color: var(--failure-border); }
-    .step-item.failed-step:hover { background: rgba(248,113,113,0.1); }
-    .step-item.failed-step.selected { background: var(--failure-dim); border-color: var(--failure-border); }
-
-    .step-item-row {
-      display: flex;
-      align-items: flex-start;
-      gap: 9px;
-    }
-    .step-num {
-      width: 24px; height: 24px;
-      border-radius: 6px;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 10px; font-weight: 700;
-      flex-shrink: 0;
-      font-family: 'JetBrains Mono', monospace;
-      margin-top: 1px;
-    }
-    .step-num.passed { background: var(--success-dim); color: var(--success); }
-    .step-num.failed { background: var(--failure-dim); color: var(--failure); }
-    .step-num.skipped { background: rgba(139,148,158,0.1); color: var(--text-tertiary); }
-
-    .step-body { flex: 1; min-width: 0; }
-    .step-label {
-      font-size: 13px;
-      font-weight: 500;
-      color: var(--text-primary);
-      line-height: 1.4;
-      word-break: break-word;
-      white-space: normal;
-    }
-    .step-item.failed-step .step-label { color: var(--failure); }
-    .step-meta {
-      font-size: 11px;
-      color: var(--text-tertiary);
-      margin-top: 2px;
-      display: flex;
-      align-items: center;
-      gap: 5px;
-    }
-    .step-time {
-      font-size: 10px;
-      color: var(--text-tertiary);
-      font-family: 'JetBrains Mono', monospace;
-      flex-shrink: 0;
-      margin-top: 2px;
-    }
-
-    /* Inline error preview */
-    .step-error-inline {
-      margin-top: 5px;
-      padding: 5px 8px;
-      background: var(--failure-dim);
-      border-radius: 5px;
-      font-size: 11px;
-      color: var(--failure);
-      line-height: 1.4;
-      word-break: break-word;
-    }
-
-    /* ── Detail Panel ── */
-    .detail {
-      background: var(--bg-surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-xl);
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-    }
-    .detail-header {
-      padding: 14px 18px;
-      border-bottom: 1px solid var(--border);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-    .detail-header h3 {
-      font-size: 11px;
-      font-weight: 700;
-      color: var(--text-tertiary);
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-    }
-
-    .detail-body {
-      flex: 1;
-      display: grid;
-      grid-template-columns: 1fr 300px;
-      overflow: hidden;
-    }
-
-    /* Screenshot area */
-    .screenshot-area {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      padding: 24px;
-      background: var(--bg-inset);
-      position: relative;
-    }
-
-    .screenshot-toggle {
-      display: flex;
-      gap: 2px;
-      padding: 3px;
-      background: var(--bg-elevated);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
-      margin-bottom: 16px;
-    }
-    .screenshot-toggle button {
-      padding: 4px 12px;
-      border: none;
-      border-radius: 6px;
-      font-family: 'Sora', sans-serif;
-      font-size: 11px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.15s;
-      background: transparent;
-      color: var(--text-tertiary);
-      letter-spacing: 0.02em;
-    }
-    .screenshot-toggle button.active { background: var(--accent-dim); color: var(--accent); }
-    .screenshot-toggle button:hover:not(.active) { color: var(--text-secondary); }
-
-    /* ── Device Frame ── */
-    .device-frame { position: relative; flex-shrink: 0; }
-
-    /* iOS device */
-    .device-frame.ios {
-      width: 280px;
-      padding: 14px 10px;
-      background: linear-gradient(145deg, #2c2c2e, #1c1c1e);
-      border-radius: 40px;
-      border: 2px solid rgba(255,255,255,0.1);
-      box-shadow: 0 20px 60px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.05), inset 0 1px 0 rgba(255,255,255,0.1);
-    }
-    [data-theme="light"] .device-frame.ios {
-      background: linear-gradient(145deg, #e8e8ed, #d1d1d6);
-      border-color: rgba(0,0,0,0.08);
-      box-shadow: 0 20px 60px rgba(0,0,0,0.15), 0 0 0 1px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.6);
-    }
-    .device-frame.ios .device-notch {
-      position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
-      width: 90px; height: 22px; background: #000; border-radius: 0 0 16px 16px; z-index: 5;
-    }
-    .device-frame.ios .device-home {
-      width: 100px; height: 4px; background: rgba(255,255,255,0.3); border-radius: 3px; margin: 8px auto 0;
-    }
-    [data-theme="light"] .device-frame.ios .device-home { background: rgba(0,0,0,0.2); }
-
-    /* Android device */
-    .device-frame.android {
-      width: 280px;
-      background: linear-gradient(165deg, #2a2a2a 0%, #1a1a1a 30%, #111 100%);
-      border-radius: 22px;
-      border: 2px solid rgba(255,255,255,0.06);
-      box-shadow: 0 25px 60px rgba(0,0,0,0.5), 0 0 0 1px rgba(0,0,0,0.8);
-      overflow: hidden;
-    }
-    .device-frame.android .device-bezel-top {
-      padding: 18px 0 14px; display: flex; align-items: center; justify-content: center; gap: 14px;
-    }
-    .device-frame.android .device-camera {
-      width: 8px; height: 8px; background: radial-gradient(circle, #2a2a4a 40%, #1a1a2e 60%);
-      border: 1.5px solid rgba(255,255,255,0.08); border-radius: 50%;
-    }
-    .device-frame.android .device-speaker {
-      width: 60px; height: 5px; background: #0a0a0a; border-radius: 4px;
-      border: 1px solid rgba(255,255,255,0.04); box-shadow: inset 0 1px 2px rgba(0,0,0,0.5);
-    }
-    .device-frame.android .device-bezel-bottom {
-      padding: 14px 0 16px; display: flex; align-items: center; justify-content: center;
-    }
-    .device-frame.android .nav-pill {
-      width: 56px; height: 5px; background: #0a0a0a; border-radius: 4px;
-      border: 1px solid rgba(255,255,255,0.05); box-shadow: inset 0 1px 2px rgba(0,0,0,0.5);
-    }
-    .device-frame.android .device-screen { margin: 0 8px; }
-
-    .screenshot-frame {
-      width: 100%; border-radius: 8px; overflow: hidden; background: #000; position: relative; flex-shrink: 0;
-    }
-    .device-frame.ios .screenshot-frame { border-radius: 30px; }
-    .device-frame.android .screenshot-frame { border-radius: 4px; }
-    .screenshot-frame img { width: 100%; display: block; object-fit: contain; }
-    .empty-screenshot {
-      width: 260px; height: 400px; display: flex; align-items: center; justify-content: center;
-      color: var(--text-tertiary); font-size: 13px; text-align: center; padding: 32px; line-height: 1.6;
-    }
-
-    /* Tap pointer overlay — uses box-shadow ripple to avoid GPU compositing layer issues
-       that occur when transform:scale() is clipped by overflow:hidden on the parent */
-    .tap-pointer {
-      position: absolute; transform: translate(-50%, -50%);
-      pointer-events: none; z-index: 10;
-    }
-    .tap-pointer-dot {
-      width: 16px; height: 16px;
-      background: #f87171; border: 2.5px solid #fff; border-radius: 50%;
-      box-shadow: 0 0 0 0 rgba(248, 113, 113, 0.5);
-      animation: tap-pulse 1.6s ease-out infinite;
-    }
-    @keyframes tap-pulse {
-      0%   { box-shadow: 0 0 0 0 rgba(248, 113, 113, 0.6); }
-      60%  { box-shadow: 0 0 0 18px rgba(248, 113, 113, 0); }
-      100% { box-shadow: 0 0 0 0 rgba(248, 113, 113, 0); }
-    }
-
-    /* Detail panel tabs */
-    .detail-tabs { display: flex; gap: 4px; }
-    .detail-tab {
-      padding: 4px 12px; font-size: 12px; font-weight: 500;
-      border: 1px solid var(--border); border-radius: 6px;
-      background: transparent; color: var(--text-secondary); cursor: pointer;
-      transition: all 0.15s;
-    }
-    .detail-tab:hover { color: var(--text-primary); }
-    .detail-tab.active { background: var(--accent); color: #fff; border-color: var(--accent); }
-
-    /* Recording video panel */
-    .recording-panel {
-      display: none; flex-direction: column; align-items: center; justify-content: center;
-      padding: 24px; gap: 12px; overflow-y: auto;
-      grid-column: 1 / -1;
-    }
-    #video-device-frame { width: 360px; }
-    .recording-panel .no-recording {
-      color: var(--text-tertiary); font-size: 13px; text-align: center;
-    }
-    .video-screen-frame {
-      position: relative; overflow: hidden; background: #000;
-      width: 100%; border-radius: 4px;
-    }
-    .device-frame.ios .video-screen-frame { border-radius: 30px; }
-    .video-screen-frame video {
-      width: 100%; display: block; background: #000;
-    }
-    .video-step-label {
-      position: absolute; bottom: 0; left: 0; right: 0;
-      background: linear-gradient(to top, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.6) 60%, transparent 100%);
-      padding: 24px 12px 10px;
-      display: flex; align-items: center; gap: 8px;
-      pointer-events: none;
-    }
-    .video-step-num {
-      flex-shrink: 0;
-      width: 20px; height: 20px; border-radius: 50%;
-      background: var(--accent); color: #fff;
-      font-size: 10px; font-weight: 700;
-      display: flex; align-items: center; justify-content: center;
-    }
-    .video-step-text {
-      font-size: 11px; font-weight: 500; color: rgba(255,255,255,0.95);
-      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-      line-height: 1.3;
-    }
-    .video-step-kind {
-      font-size: 9px; font-weight: 400; color: rgba(255,255,255,0.55);
-      white-space: nowrap;
-    }
-
-    /* Step info sidebar */
-    .step-info {
-      padding: 18px;
-      overflow-y: auto;
-      border-left: 1px solid var(--border);
-    }
-    .step-info::-webkit-scrollbar { width: 4px; }
-    .step-info::-webkit-scrollbar-track { background: transparent; }
-    .step-info::-webkit-scrollbar-thumb { background: var(--border-emphasis); border-radius: 4px; }
-
-    .info-section {
-      margin-bottom: 16px;
-      padding-bottom: 16px;
-      border-bottom: 1px solid var(--border);
-    }
-    .info-section:last-child { margin-bottom: 0; padding-bottom: 0; border-bottom: none; }
-    .info-label {
-      font-size: 10px;
-      font-weight: 700;
-      color: var(--text-tertiary);
-      text-transform: uppercase;
-      letter-spacing: 0.09em;
-      margin-bottom: 5px;
-    }
-    .info-value {
-      font-size: 13px;
-      color: var(--text-primary);
-      font-weight: 500;
-      line-height: 1.55;
-      word-break: break-word;
-    }
-    .info-value.error {
-      color: var(--failure);
-      background: var(--failure-bg);
-      padding: 8px 10px;
-      border-radius: var(--radius-sm);
-      border: 1px solid var(--failure-border);
-      font-size: 12px;
-    }
-    .info-value.mono { font-family: 'JetBrains Mono', monospace; font-size: 12px; }
-    .info-value.command {
-      padding: 9px 11px;
-      background: var(--bg-inset);
-      border-radius: var(--radius-sm);
-      border: 1px solid var(--border);
-      font-size: 13px;
-      line-height: 1.55;
-      font-style: italic;
-      color: var(--text-primary);
-    }
-    .info-status-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 12px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-      padding: 4px 10px;
-      border-radius: 999px;
-    }
-    .info-status-badge.passed { background: var(--success-dim); color: var(--success); border: 1px solid var(--success-border); }
-    .info-status-badge.failed { background: var(--failure-dim); color: var(--failure); border: 1px solid var(--failure-border); }
-    .info-status-badge.skipped { background: var(--bg-elevated); color: var(--text-tertiary); border: 1px solid var(--border); }
-
-    @media (max-width: 1100px) {
-      .workspace { grid-template-columns: 1fr; }
-      .detail-body { grid-template-columns: 1fr; }
-      .step-info { border-left: none; border-top: 1px solid var(--border); }
-      .device-frame.ios, .device-frame.android { width: 240px; }
-    }
-    @media (max-width: 768px) {
-      .workspace { grid-template-columns: 1fr; }
-      .page { padding: 16px 16px 48px; }
-    }
-
-    /* ── Export button ── */
-    .export-btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 6px 14px;
-      border-radius: var(--radius-md);
-      background: var(--bg-elevated);
-      border: 1px solid var(--border);
-      color: var(--text-secondary);
-      font-family: 'Sora', sans-serif;
-      font-size: 12px;
-      font-weight: 500;
-      text-decoration: none;
-      transition: all 0.15s;
-      cursor: pointer;
-    }
-    .export-btn:hover {
-      border-color: var(--accent-border);
-      color: var(--accent);
-      background: var(--accent-dim);
-      opacity: 1;
-    }
-
-    /* ── Step duration bar ── */
-    .step-duration-bar-wrap {
-      margin-top: 5px;
-      height: 3px;
-      border-radius: 3px;
-      background: var(--bg-elevated);
-      overflow: hidden;
-    }
-    .step-duration-bar {
-      height: 100%;
-      border-radius: 3px;
-      background: var(--accent);
-      opacity: 0.5;
-      transition: width 0.3s ease-out;
-    }
-    .step-item.failed-step .step-duration-bar { background: var(--failure); opacity: 0.6; }
-
-    /* ── Jump-to-failure button ── */
-    .jump-failure-btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      padding: 3px 9px;
-      border-radius: var(--radius-sm);
-      background: var(--failure-dim);
-      border: 1px solid var(--failure-border);
-      color: var(--failure);
-      font-family: 'Sora', sans-serif;
-      font-size: 10px;
-      font-weight: 700;
-      cursor: pointer;
-      transition: all 0.15s;
-      letter-spacing: 0.02em;
-      text-transform: uppercase;
-    }
-    .jump-failure-btn:hover { background: rgba(248,113,113,0.18); }
-
-    /* ── Appium Log Panel ── */
-    .appium-log-panel {
-      margin-top: 16px;
-      border: 1px solid var(--border);
-      border-radius: var(--radius-lg);
-      overflow: hidden;
-      background: var(--bg-surface);
-    }
-    .appium-log-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 12px 18px;
-      cursor: pointer;
-      user-select: none;
-      background: var(--bg-inset);
-      border-bottom: 1px solid var(--border);
-      transition: background 0.15s;
-    }
-    .appium-log-header:hover { background: var(--bg-hover); }
-    .appium-log-title {
-      font-size: 12px;
-      font-weight: 700;
-      color: var(--text-secondary);
-      text-transform: uppercase;
-      letter-spacing: 0.07em;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .appium-log-title-dot {
-      width: 7px; height: 7px;
-      border-radius: 50%;
-      background: var(--failure);
-      flex-shrink: 0;
-    }
-    .appium-log-chevron {
-      color: var(--text-tertiary);
-      font-size: 12px;
-      transition: transform 0.2s;
-    }
-    .appium-log-chevron.open { transform: rotate(180deg); }
-    .appium-log-body {
-      display: none;
-      padding: 16px 18px;
-      overflow-x: auto;
-    }
-    .appium-log-body.expanded { display: block; }
-    .appium-log-pre {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 11px;
-      line-height: 1.65;
-      color: var(--text-secondary);
-      white-space: pre;
-      overflow-x: auto;
-      margin: 0;
-    }
-  </style>
+${head(`${data.title} · AppClaw Test`)}
 </head>
-<body>
-  <main class="page">
-    <!-- Header -->
-    <header class="run-header animate-in">
-      <div class="run-header-left">
-        <a class="back-btn" href="/" title="All runs">${iconArrowLeft()}</a>
-        <div style="min-width:0">
-          <h1 class="run-title">${escapeHtml(name)}</h1>
-          <div class="run-id-label">${escapeHtml(formatDate(manifest.startedAt))}</div>
+<body class="${verdict === 'FAILED' ? 'is-failed' : 'is-passed'}">
+<div class="grain"></div>
+${themeToggle()}
+<main class="detail">
+  <div class="dt-top">
+    <a class="dt-back" href="/">← all tests</a>
+    <span class="status-glyph s-${data.status}">${data.status === 'failed' ? '✗' : '✓'}</span>
+    <h2 class="dt-title">${esc(data.title)}</h2>
+    <span class="dt-verdict v-${data.status}">${data.status}</span>
+  </div>
+  <div class="dt-meta">
+    <span class="chip plat plat-${esc(manifest.platform)}">${platIcon} ${esc(manifest.platform)}</span>
+    <span class="chip">${esc(data.device)}${data.os ? ' · ' + esc(data.os) : ''}</span>
+    <span class="chip">${esc(fmtDur(data.durationMs))}</span>
+    <span class="chip">${esc(fmtDate(manifest.startedAt))}</span>
+    ${specChip}
+    ${showFileChip ? `<span class="chip">${esc(data.file)}</span>` : ''}
+    ${data.video ? '<button class="chip dt-rec" id="dt-rec-btn" onclick="toggleVideo()">▶ recording</button>' : ''}
+    <a class="chip" href="/api/runs/${esc(data.runId)}" download="${esc(data.runId)}.json">↓ JSON</a>
+    ${jumpToFail}
+  </div>
+  ${data.error ? `<div class="error-box"><div class="error-label">Failure</div><pre class="error-msg">${esc(data.error)}</pre></div>` : ''}
+  <div class="dt-grid">
+    <div class="dt-panel">
+      <div class="dt-steps-head"><span>Steps</span><span>${data.steps.length}</span></div>
+      <div class="dt-steps" id="dt-steps">${renderStepListHTML(data.steps)}</div>
+    </div>
+    <div class="dt-stage">
+      <div class="phone big">
+        <div class="phone-screen">
+          <img id="dt-img" alt="">
+          <span id="dt-tap" class="tap" hidden></span>
+          ${data.video ? '<video id="dt-video" class="dt-video" playsinline controls preload="metadata" hidden></video>' : ''}
         </div>
       </div>
-      <div style="display:flex;align-items:center;gap:10px;flex-shrink:0">
-        <a class="export-btn" href="/api/runs/${escapeHtml(manifest.runId)}" download="${escapeHtml(manifest.runId)}.json" title="Download run JSON">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-          Export JSON
-        </a>
-        <div class="theme-toggle" id="theme-toggle">
-          <button id="theme-light" onclick="setTheme('light')">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
-            Light
-          </button>
-          <button id="theme-dark" onclick="setTheme('dark')">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-            Dark
-          </button>
-        </div>
-      </div>
-    </header>
-
-    <!-- Status Hero -->
-    ${(() => {
-      const failedStep = manifest.steps.find((s) => s.status === 'failed');
-      const verdictText = manifest.success
-        ? 'Flow passed'
-        : `Flow failed at step ${manifest.stepsExecuted} of ${manifest.stepsTotal}`;
-      const cls = manifest.success ? 'passed' : 'failed';
-      const icon = manifest.success
-        ? '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>'
-        : '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
-
-      let reasonHtml = '';
-      if (!manifest.success) {
-        if (failedStep?.verbatim) {
-          reasonHtml = `<div class="status-hero-reason"><strong>"${escapeHtml(failedStep.verbatim)}"</strong></div>`;
-        }
-        if (manifest.reason) {
-          reasonHtml += `<div class="status-hero-reason">${escapeHtml(manifest.reason)}</div>`;
-        } else if (failedStep?.error) {
-          reasonHtml += `<div class="status-hero-reason">${escapeHtml(failedStep.error)}</div>`;
-        }
-      }
-
-      return `<section class="status-hero ${cls} animate-in animate-in-1">
-        <div class="status-hero-icon">${icon}</div>
-        <div style="min-width:0">
-          <div class="status-hero-verdict">${escapeHtml(verdictText)}</div>
-          ${reasonHtml}
-          <div class="status-hero-meta">
-            <span>${platformIcon} <strong>${escapeHtml(manifest.platform)}</strong></span>
-            <span>${iconClock()} <strong>${escapeHtml(formatDuration(manifest.durationMs))}</strong></span>
-            <span>${iconSteps()} <strong>${manifest.stepsExecuted}/${manifest.stepsTotal}</strong> steps</span>
-            ${manifest.device ? `<span>${iconDevice()} <strong>${escapeHtml(manifest.device)}</strong></span>` : ''}
-          </div>
-        </div>
-      </section>`;
-    })()}
-
-    ${hasPhases ? renderPhaseTrack(manifest) : ''}
-
-    <!-- Workspace -->
-    <section class="workspace animate-in" id="workspace">
-      <!-- Timeline -->
-      <div class="timeline">
-        <div class="timeline-header">
-          <h3>Steps</h3>
-          <div style="display:flex;align-items:center;gap:8px">
-            ${!manifest.success ? `<button class="jump-failure-btn" onclick="jumpToFailure()" title="Jump to failed step">↓ Failure</button>` : ''}
-            <span style="font-size:11px;color:var(--text-tertiary);font-family:'JetBrains Mono',monospace">${manifest.steps.length}</span>
-          </div>
-        </div>
-        <div class="timeline-scroll">
-          ${renderStepTimeline(manifest)}
-        </div>
-      </div>
-
-      <!-- Detail Panel -->
-      <div class="detail">
-        <div class="detail-header">
-          <div class="detail-tabs">
-            <button class="detail-tab active" id="tab-inspector" onclick="switchDetailTab('inspector')">Step Inspector</button>
-            <button class="detail-tab" id="tab-recording" onclick="switchDetailTab('recording')">Recording</button>
-          </div>
-          <div class="screenshot-toggle" id="screenshot-toggle" style="display:none"></div>
-        </div>
-        <div class="detail-body">
-          <div id="recording-panel" class="recording-panel">
-            ${
-              manifest.videoPath
-                ? `<div class="device-frame ${escapeHtml(manifest.platform)}" id="video-device-frame">
-                    ${
-                      manifest.platform === 'ios'
-                        ? '<div class="device-notch"></div>'
-                        : '<div class="device-bezel-top"><div class="device-camera"></div><div class="device-speaker"></div></div>'
-                    }
-                    ${manifest.platform === 'android' ? '<div class="device-screen">' : ''}
-                    <div class="video-screen-frame">
-                      <video id="run-video" controls playsinline>
-                        <source src="/artifacts/${escapeHtml(manifest.runId)}/${escapeHtml(manifest.videoPath)}" type="video/mp4">
-                      </video>
-                      <div class="video-step-label" id="video-step-label" style="display:none">
-                        <div class="video-step-num" id="video-step-num">1</div>
-                        <div style="min-width:0">
-                          <div class="video-step-text" id="video-step-text"></div>
-                          <div class="video-step-kind" id="video-step-kind"></div>
-                        </div>
-                      </div>
-                    </div>
-                    ${manifest.platform === 'android' ? '</div>' : ''}
-                    ${
-                      manifest.platform === 'ios'
-                        ? '<div class="device-home"></div>'
-                        : '<div class="device-bezel-bottom"><div class="nav-pill"></div></div>'
-                    }
-                  </div>`
-                : `<div class="no-recording">No recording available for this run</div>`
-            }
-          </div>
-          <div id="inspector-panel" style="display:contents">
-          <div class="screenshot-area" id="screenshot-area">
-            ${
-              manifest.steps.length > 0 && manifest.steps[0].screenshotPath
-                ? `<div class="device-frame ${escapeHtml(manifest.platform)}" id="device-frame">
-                  ${
-                    manifest.platform === 'ios'
-                      ? '<div class="device-notch"></div>'
-                      : '<div class="device-bezel-top"><div class="device-camera"></div><div class="device-speaker"></div></div>'
-                  }
-                  <div class="${manifest.platform === 'android' ? 'device-screen' : ''}"><div class="screenshot-frame" id="screenshot-frame"><img id="screenshot-img" src="/artifacts/${escapeHtml(manifest.runId)}/${escapeHtml(manifest.steps[0].screenshotPath)}" alt="Step screenshot"></div></div>
-                  ${
-                    manifest.platform === 'ios'
-                      ? '<div class="device-home"></div>'
-                      : '<div class="device-bezel-bottom"><div class="nav-pill"></div></div>'
-                  }
-                </div>`
-                : `<div class="empty-screenshot" id="screenshot-frame">Select a step to view its screenshot</div>`
-            }
-          </div>
-          <div class="step-info" id="step-info">
-            ${manifest.steps.length > 0 ? renderStepDetailInfo(manifest.steps[0]) : ''}
-          </div>
-          </div><!-- /inspector-panel -->
-        </div>
-      </div>
-    </section>
-    ${renderAppiumLogPanel(manifest)}
-  </main>
-
-  <script>
-    var steps = ${JSON.stringify(
-      manifest.steps.map((s) => ({
-        index: s.index,
-        kind: s.kind,
-        verbatim: s.verbatim || null,
-        target: s.target || null,
-        phase: s.phase,
-        status: s.status,
-        durationMs: s.durationMs,
-        error: s.error || null,
-        message: s.message || null,
-        screenshotPath: s.screenshotPath || null,
-        beforeScreenshotPath: s.beforeScreenshotPath || null,
-        tapCoordinates: s.tapCoordinates || null,
-        deviceScreenSize: s.deviceScreenSize || null,
-        screenshotSize: s.screenshotSize || null,
-        videoOffsetMs: s.videoOffsetMs ?? null,
-      }))
-    ).replace(/</g, '\\u003c')};
-    var runId = ${JSON.stringify(manifest.runId).replace(/</g, '\\u003c')};
-    var platform = ${JSON.stringify(manifest.platform).replace(/</g, '\\u003c')};
-    var currentStep = null;
-    var currentView = 'before';
-
-    function selectStep(index) {
-      document.querySelectorAll('.step-item').forEach(function(el) { el.classList.remove('selected'); });
-      var btn = document.querySelector('[data-step="' + index + '"]');
-      if (btn) btn.classList.add('selected');
-
-      var step = steps.find(function(s) { return s.index === index; });
-      if (!step) return;
-      currentStep = step;
-
-      var hasBefore = step.beforeScreenshotPath && step.tapCoordinates;
-      currentView = hasBefore ? 'before' : 'after';
-
-      renderScreenshot();
-      renderInfo();
-    }
-
-    function renderScreenshot() {
-      var step = currentStep;
-      if (!step) return;
-
-      var area = document.getElementById('screenshot-area');
-      var toggle = document.getElementById('screenshot-toggle');
-      var hasBefore = step.beforeScreenshotPath && step.tapCoordinates;
-
-      if (hasBefore && step.screenshotPath) {
-        toggle.style.display = 'flex';
-        toggle.innerHTML =
-          '<button class="' + (currentView === 'before' ? 'active' : '') + '" onclick="switchView(\\'before\\')">Tap Location</button>' +
-          '<button class="' + (currentView === 'after' ? 'active' : '') + '" onclick="switchView(\\'after\\')">After</button>';
-      } else {
-        toggle.style.display = 'none';
-      }
-
-      var imgPath = null;
-      var showPointer = false;
-
-      if (currentView === 'before' && hasBefore) {
-        imgPath = step.beforeScreenshotPath;
-        showPointer = true;
-      } else if (step.screenshotPath) {
-        imgPath = step.screenshotPath;
-      }
-
-      if (imgPath) {
-        var deviceTop = platform === 'ios'
-          ? '<div class="device-notch"></div>'
-          : '<div class="device-bezel-top"><div class="device-camera"></div><div class="device-speaker"></div></div>';
-        var deviceBottom = platform === 'ios'
-          ? '<div class="device-home"></div>'
-          : '<div class="device-bezel-bottom"><div class="nav-pill"></div></div>';
-        var screenWrapOpen = platform === 'android' ? '<div class="device-screen">' : '';
-        var screenWrapClose = platform === 'android' ? '</div>' : '';
-
-        area.innerHTML =
-          '<div class="device-frame ' + platform + '" id="device-frame">' +
-            deviceTop +
-            screenWrapOpen +
-            '<div class="screenshot-frame" id="screenshot-frame">' +
-              '<img id="screenshot-img" src="/artifacts/' + runId + '/' + imgPath + '" alt="Step screenshot">' +
-            '</div>' +
-            screenWrapClose +
-            deviceBottom +
-          '</div>';
-
-        var frame = document.getElementById('screenshot-frame');
-        if (showPointer && step.tapCoordinates) {
-          var img = document.getElementById('screenshot-img');
-          var addPointer = function() {
-            var old = frame.querySelector('.tap-pointer');
-            if (old) old.remove();
-
-            // Tap coordinates are always in deviceScreenSize space (Appium's coordinate
-            // system). Screenshots may be downscaled (e.g. 720x1560 vs device 1440x3120)
-            // so screenshotSize (PNG dims) must not be used for coordinate mapping.
-            var coordW, coordH;
-            if (step.deviceScreenSize) {
-              coordW = step.deviceScreenSize.width;
-              coordH = step.deviceScreenSize.height;
-            } else {
-              coordW = img.naturalWidth || 360;
-              coordH = img.naturalHeight || 800;
-            }
-
-            var pctX = Math.min(100, Math.max(0, (step.tapCoordinates.x / coordW) * 100));
-            var pctY = Math.min(100, Math.max(0, (step.tapCoordinates.y / coordH) * 100));
-
-            var pointer = document.createElement('div');
-            pointer.className = 'tap-pointer';
-            pointer.style.left = pctX + '%';
-            pointer.style.top = pctY + '%';
-            pointer.innerHTML = '<div class="tap-pointer-dot"></div>';
-            frame.appendChild(pointer);
-          };
-          if (img.complete) { addPointer(); }
-          else { img.onload = addPointer; }
-        }
-      } else {
-        area.innerHTML = '<div class="empty-screenshot" id="screenshot-frame">No screenshot for this step</div>';
-      }
-    }
-
-    function switchView(view) {
-      currentView = view;
-      renderScreenshot();
-    }
-
-    function renderInfo() {
-      var step = currentStep;
-      if (!step) return;
-      var el = document.getElementById('step-info');
-      var html = '';
-
-      if (step.verbatim) {
-        html += '<div class="info-section"><div class="info-label">Instruction</div><div class="info-value command">' + esc(step.verbatim) + '</div></div>';
-      } else if (step.target) {
-        html += '<div class="info-section"><div class="info-label">Target</div><div class="info-value command">' + esc(step.target) + '</div></div>';
-      }
-      html += '<div class="info-section"><div class="info-label">Status</div><div class="info-status-badge ' + step.status + '">' + step.status + '</div></div>';
-      html += '<div class="info-section"><div class="info-label">Action</div><div class="info-value">' + kindLabel(step.kind) + '</div></div>';
-      html += '<div class="info-section"><div class="info-label">Phase</div><div class="info-value">' + step.phase + '</div></div>';
-      html += '<div class="info-section"><div class="info-label">Duration</div><div class="info-value mono">' + fmtMs(step.durationMs) + '</div></div>';
-      if (step.error) {
-        html += '<div class="info-section"><div class="info-label">Error</div><div class="info-value error">' + esc(step.error) + '</div></div>';
-      }
-      if (step.message && step.message !== step.error) {
-        html += '<div class="info-section"><div class="info-label">Message</div><div class="info-value">' + esc(step.message) + '</div></div>';
-      }
-      el.innerHTML = html;
-    }
-
-    function esc(str) {
-      if (!str) return '';
-      var d = document.createElement('div');
-      d.appendChild(document.createTextNode(str));
-      return d.innerHTML;
-    }
-
-    function fmtMs(ms) {
-      if (ms < 1000) return ms + 'ms';
-      return (ms / 1000).toFixed(1) + 's';
-    }
-
-    function kindLabel(kind) {
-      var map = {tap:'Tap',type:'Type',assert:'Assert',scrollAssert:'Scroll Assert',swipe:'Swipe',drag:'Drag',wait:'Wait',waitUntil:'Wait Until',openApp:'Launch',launchApp:'Launch',back:'Back',home:'Home',enter:'Enter',getInfo:'Get Info',done:'Done'};
-      return map[kind] || kind;
-    }
-
-    function switchDetailTab(tab) {
-      var inspector = document.getElementById('inspector-panel');
-      var recording = document.getElementById('recording-panel');
-      var tabInspector = document.getElementById('tab-inspector');
-      var tabRecording = document.getElementById('tab-recording');
-      if (tab === 'recording') {
-        inspector.style.display = 'none';
-        recording.style.display = 'flex';
-        tabInspector.classList.remove('active');
-        tabRecording.classList.add('active');
-      } else {
-        inspector.style.display = 'contents';
-        recording.style.display = 'none';
-        tabInspector.classList.add('active');
-        tabRecording.classList.remove('active');
-        // Remove video step highlights when switching back to inspector
-        document.querySelectorAll('.step-item').forEach(function(el) {
-          el.classList.remove('video-active');
-        });
-      }
-    }
-
-    // Video step label — sync overlay with video playback
-    (function() {
-      // Build step start offsets in seconds for video sync.
-      // Prefer videoOffsetMs (actual wall-clock offset from run start) when available.
-      // Fall back to cumulative durationMs for older manifests that lack videoOffsetMs.
-      var hasRealOffsets = steps.length > 0 && steps[0].videoOffsetMs !== null;
-      var stepOffsets = [];
-      if (hasRealOffsets) {
-        // Use the first step's videoOffsetMs as the base so the label appears
-        // at the right time relative to when the video recording actually started.
-        var baseOffset = steps[0].videoOffsetMs || 0;
-        for (var i = 0; i < steps.length; i++) {
-          var off = steps[i].videoOffsetMs !== null ? steps[i].videoOffsetMs : baseOffset;
-          stepOffsets.push((off - baseOffset) / 1000);
-        }
-      } else {
-        var cum = 0;
-        for (var i = 0; i < steps.length; i++) {
-          stepOffsets.push(cum / 1000);
-          cum += (steps[i].durationMs || 0);
-        }
-      }
-
-      var lastVideoActiveIdx = -1;
-
-      function updateVideoStepLabel(currentTime) {
-        if (!steps.length) return;
-        var label = document.getElementById('video-step-label');
-        var numEl = document.getElementById('video-step-num');
-        var textEl = document.getElementById('video-step-text');
-        var kindEl = document.getElementById('video-step-kind');
-        if (!label || !numEl || !textEl || !kindEl) return;
-
-        // Find the last step whose offset is <= currentTime
-        var activeIdx = 0;
-        for (var j = stepOffsets.length - 1; j >= 0; j--) {
-          if (currentTime >= stepOffsets[j]) { activeIdx = j; break; }
-        }
-        var s = steps[activeIdx];
-        var name = s.verbatim || s.target || kindLabel(s.kind);
-        numEl.textContent = String(s.index + 1);
-        textEl.textContent = name;
-        kindEl.textContent = kindLabel(s.kind);
-        label.style.display = 'flex';
-
-        // Highlight matching step in the left panel
-        if (activeIdx !== lastVideoActiveIdx) {
-          lastVideoActiveIdx = activeIdx;
-          document.querySelectorAll('.step-item').forEach(function(el) {
-            el.classList.remove('video-active');
-          });
-          var stepEl = document.querySelector('[data-step="' + s.index + '"]');
-          if (stepEl) {
-            stepEl.classList.add('video-active');
-            stepEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-          }
-        }
-      }
-
-      window.addEventListener('DOMContentLoaded', function() {
-        var video = document.getElementById('run-video');
-        if (!video) return;
-        video.addEventListener('timeupdate', function() {
-          updateVideoStepLabel(video.currentTime);
-        });
-        video.addEventListener('play', function() {
-          updateVideoStepLabel(video.currentTime);
-        });
-        // Show label immediately at time 0
-        video.addEventListener('loadedmetadata', function() {
-          updateVideoStepLabel(0);
-        });
-      });
-    })();
-
-    // Auto-select first step
-    if (steps.length > 0) {
-      window.addEventListener('DOMContentLoaded', function() { selectStep(steps[0].index); });
-    }
-
-    // Jump to failed step
-    function jumpToFailure() {
-      var failed = steps.find(function(s) { return s.status === 'failed'; });
-      if (!failed) return;
-      selectStep(failed.index);
-      var btn = document.querySelector('[data-step="' + failed.index + '"]');
-      if (btn) btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
-
-    // Appium log toggle
-    function toggleAppiumLog() {
-      var body = document.getElementById('appium-log-body');
-      var chevron = document.getElementById('appium-log-chevron');
-      if (!body) return;
-      var open = body.classList.toggle('expanded');
-      if (chevron) chevron.classList.toggle('open', open);
-    }
-
-    // anime.js entrance animations for run detail page
-    window.addEventListener('DOMContentLoaded', function() {
-      if (typeof anime === 'undefined') {
-        document.querySelectorAll('.animate-in').forEach(function(el) {
-          el.style.opacity = '1';
-          el.style.transform = 'none';
-        });
-        return;
-      }
-
-      /* Respect prefers-reduced-motion */
-      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-        document.querySelectorAll('.animate-in').forEach(function(el) {
-          el.style.opacity = '1';
-          el.style.transform = 'none';
-        });
-        return;
-      }
-
-      anime.timeline({ easing: 'easeOutQuart', duration: 400 })
-        .add({ targets: '.run-header', opacity: [0, 1], translateY: [-10, 0] })
-        .add({ targets: '.status-hero', opacity: [0, 1], translateY: [-8, 0], duration: 360 }, '-=220')
-        .add({ targets: '.phase-track', opacity: [0, 1], translateY: [-6, 0], duration: 300 }, '-=200')
-        .add({ targets: '#workspace', opacity: [0, 1], translateY: [-8, 0], duration: 360 }, '-=220')
-        .add({ targets: '.step-item', opacity: [0, 1], translateX: [-5, 0], duration: 180, delay: anime.stagger(12) }, '-=300')
-        .add({ targets: '.appium-log-panel', opacity: [0, 1], translateY: [6, 0], duration: 280 }, '-=80');
-    });
-  </script>
-  ${themeScript()}
+    </div>
+    <div class="dt-panel">
+      <div class="dt-insp-head"><span>Inspector</span></div>
+      <div class="dt-insp" id="dt-insp"></div>
+    </div>
+  </div>
+  ${renderRunLogs(data)}
+</main>
+<script>${themeScript()}</script>
+<script>window.__RUN__=${embedJson(data)};</script>
+<script>${runScript()}</script>
 </body>
 </html>`;
 }
 
-function renderPhaseTrack(manifest: RunManifest): string {
-  if (!manifest.phaseResults) return '';
-  return `
-    <section class="phase-track animate-in animate-in-2">
-      ${manifest.phaseResults
-        .map((pr) => {
-          const cls = pr.success ? 'passed' : 'failed';
-          return `
-          <div class="phase-seg ${cls}">
-            <span class="phase-name">${phaseLabel(pr.phase)}</span>
-            <span class="phase-steps">${pr.stepsExecuted}/${pr.stepsTotal}</span>
-          </div>`;
-        })
-        .join('')}
-    </section>`;
-}
-
-function renderStepTimeline(manifest: RunManifest): string {
-  const hasPhases = manifest.phaseResults && manifest.phaseResults.length > 0;
-  const maxDuration = Math.max(1, ...manifest.steps.map((s) => s.durationMs));
-  let html = '';
-  let currentPhase: FlowPhase | null = null;
-
-  for (const step of manifest.steps) {
-    if (hasPhases && step.phase !== currentPhase) {
-      currentPhase = step.phase;
-      html += `<div class="phase-divider">${phaseLabel(step.phase)}</div>`;
-    }
-    html += renderStepItem(step, maxDuration);
-  }
-
-  if (manifest.steps.length === 0) {
-    html = '<div class="empty-screenshot">No steps recorded</div>';
-  }
-
-  return html;
-}
-
-function renderStepItem(step: StepArtifact, maxDuration = 1): string {
-  const isFirst = step.index === 0;
-  const label = step.verbatim || step.target || step.kind;
-  const failedCls = step.status === 'failed' ? ' failed-step' : '';
-  const durPct = Math.max(2, Math.round((step.durationMs / maxDuration) * 100));
-  return `
-    <button
-      class="step-item${isFirst ? ' selected' : ''}${failedCls}"
-      data-step="${step.index}"
-      onclick="selectStep(${step.index})"
-      type="button"
-    >
-      <div class="step-item-row">
-        <span class="step-num ${step.status}">${step.index + 1}</span>
-        <div class="step-body">
-          <div class="step-label">${escapeHtml(label)}</div>
-          <div class="step-meta">
-            <span>${escapeHtml(stepKindLabel(step.kind))}</span>
-          </div>
-        </div>
-        <span class="step-time">${escapeHtml(formatDuration(step.durationMs))}</span>
-      </div>
-      <div class="step-duration-bar-wrap">
-        <div class="step-duration-bar" style="width:${durPct}%"></div>
-      </div>
-      ${step.status === 'failed' && step.error ? `<div class="step-error-inline">${escapeHtml(step.error)}</div>` : ''}
-    </button>`;
-}
-
-function renderStepDetailInfo(step: StepArtifact): string {
-  let html = '';
-  if (step.verbatim) {
-    html += `<div class="info-section"><div class="info-label">Instruction</div><div class="info-value command">${escapeHtml(step.verbatim)}</div></div>`;
-  } else if (step.target) {
-    html += `<div class="info-section"><div class="info-label">Target</div><div class="info-value command">${escapeHtml(step.target)}</div></div>`;
-  }
-  html += `<div class="info-section"><div class="info-label">Status</div><div class="info-status-badge ${step.status}">${escapeHtml(step.status)}</div></div>`;
-  html += `<div class="info-section"><div class="info-label">Action</div><div class="info-value">${escapeHtml(stepKindLabel(step.kind))}</div></div>`;
-  html += `<div class="info-section"><div class="info-label">Phase</div><div class="info-value">${escapeHtml(step.phase)}</div></div>`;
-  html += `<div class="info-section"><div class="info-label">Duration</div><div class="info-value mono">${escapeHtml(formatDuration(step.durationMs))}</div></div>`;
-  if (step.error) {
-    html += `<div class="info-section"><div class="info-label">Error</div><div class="info-value error">${escapeHtml(step.error)}</div></div>`;
-  }
-  if (step.message && step.message !== step.error) {
-    html += `<div class="info-section"><div class="info-label">Message</div><div class="info-value">${escapeHtml(step.message)}</div></div>`;
-  }
-  return html;
-}
-
-/* ─── Appium Log Panel ───────────────────────────────────── */
-
-function renderAppiumLogPanel(manifest: RunManifest): string {
-  const log = manifest.failureLogs?.appiumMcp;
-  if (!log) return '';
-  return `
-  <div class="appium-log-panel animate-in" style="margin-top:16px">
-    <div class="appium-log-header" onclick="toggleAppiumLog()">
-      <span class="appium-log-title">
-        <span class="appium-log-title-dot"></span>
-        Appium MCP Log (failure context)
+function renderStepListHTML(steps: ClientStep[]): string {
+  if (steps.length === 0)
+    return '<div class="dt-noshot" style="padding:28px">No captured steps</div>';
+  return steps
+    .map(
+      (
+        s,
+        i
+      ) => `<button class="dt-step s-${s.status}" data-i="${i}" id="step-${s.n}" onclick="selectStep(${i})">
+      <span class="dt-step-n">${s.n}</span>
+      <span class="dt-step-main">
+        <span class="dt-step-desc">${esc(s.desc)}</span>
+        <span class="dt-step-kind">${esc(s.kind)}${s.phase ? ' · ' + esc(s.phase) : ''}</span>
       </span>
-      <span class="appium-log-chevron" id="appium-log-chevron">▼</span>
-    </div>
-    <div class="appium-log-body" id="appium-log-body">
-      <pre class="appium-log-pre">${escapeHtml(log)}</pre>
-    </div>
-  </div>`;
+      <span class="dt-step-time">${esc(fmtDur(s.durationMs))}</span>
+    </button>`
+    )
+    .join('');
+}
+
+function renderRunLogs(data: {
+  status: string;
+  steps: ClientStep[];
+  error?: string;
+  mcpLog?: string;
+}): string {
+  const show = data.status === 'failed' || !!data.mcpLog;
+  if (!show) return '';
+  const traceLines = data.steps.map((s) => {
+    const mark = s.status === 'failed' ? '✗' : s.status === 'passed' ? '✓' : '•';
+    const msg = s.message ? ` — ${s.message}` : '';
+    return `${mark} #${s.n} ${s.kind}: ${s.desc}${msg}`;
+  });
+  if (data.error) {
+    traceLines.push('');
+    traceLines.push(`✗ ${data.error}`);
+  }
+  const trace = traceLines.join('\n');
+  let blocks = `<details class="logblk" open><summary>AppClaw log</summary><pre class="logpre">${esc(trace)}</pre></details>`;
+  if (data.mcpLog) {
+    blocks += `<details class="logblk"><summary>appium-mcp server log <span class="logsub">(shared across workers)</span></summary><pre class="logpre">${esc(data.mcpLog)}</pre></details>`;
+  }
+  return `<section class="dt-logs"><div class="dt-logs-head">Logs</div>${blocks}</section>`;
+}
+
+function runScript(): string {
+  return `
+var DATA=window.__RUN__||{steps:[]};
+var curStep=0, videoMode=false;
+
+function highlightStep(i){
+  document.querySelectorAll('.dt-step').forEach(function(b){b.classList.toggle('active',+b.dataset.i===i);});
+  var act=document.querySelector('.dt-step[data-i="'+i+'"]'); if(act)act.scrollIntoView({block:'nearest'});
+}
+function placeTap(t){
+  var img=document.getElementById('dt-img'), tap=document.getElementById('dt-tap'), scr=img.parentElement;
+  var w=t.w||img.naturalWidth, h=t.h||img.naturalHeight;
+  if(!w||!h){tap.hidden=true;return;}
+  scr.style.aspectRatio=(img.naturalWidth||w)+'/'+(img.naturalHeight||h);
+  tap.style.left=(t.x/w*100)+'%'; tap.style.top=(t.y/h*100)+'%'; tap.hidden=false;
+}
+function renderInspector(s){
+  var rows=[['Instruction',esc(s.desc),'']];
+  rows.push(['Status','<span class="insp-pill s-'+s.status+'">'+s.status+'</span>','raw']);
+  rows.push(['Action',esc(s.kind),'mono']);
+  if(s.phase)rows.push(['Phase',esc(s.phase),'mono']);
+  rows.push(['Duration',fmt(s.durationMs),'mono']);
+  if(s.message)rows.push(['Message',esc(s.message),'']);
+  if(s.tap)rows.push(['Tap point','['+s.tap.x+', '+s.tap.y+']','mono']);
+  document.getElementById('dt-insp').innerHTML=rows.map(function(r){
+    var body=r[2]==='raw'?r[1]:'<div class="insp-val'+(r[2]==='mono'?' mono':'')+'">'+r[1]+'</div>';
+    return '<div class="insp-row"><div class="insp-label">'+r[0]+'</div>'+body+'</div>';
+  }).join('');
+}
+function videoTimeToStep(cur,dur){
+  if(!dur||!isFinite(dur)||!DATA.durationMs)return curStep;
+  var wall=(cur/dur)*DATA.durationMs, idx=0;
+  for(var k=0;k<DATA.steps.length;k++){ if((DATA.steps[k].offsetMs||0)<=wall) idx=k; }
+  return idx;
+}
+function stepToVideoTime(s,dur){
+  if(!dur||!isFinite(dur)||!DATA.durationMs)return 0;
+  return Math.max(0,Math.min(dur,((s.offsetMs||0)/DATA.durationMs)*dur));
+}
+function selectStep(i){
+  var s=DATA.steps[i]; if(!s)return;
+  curStep=i;
+  highlightStep(i); renderInspector(s);
+  if(location.hash!=='#step-'+s.n) history.replaceState(null,'','#step-'+s.n);
+  if(videoMode){
+    var vid=document.getElementById('dt-video');
+    if(vid) vid.currentTime=stepToVideoTime(s,vid.duration);
+    return;
+  }
+  var img=document.getElementById('dt-img'), tap=document.getElementById('dt-tap');
+  tap.hidden=true;
+  img.onload=function(){ if(curStep===i&&!videoMode&&s.tap) placeTap(s.tap); };
+  if(s.img){img.style.display='';img.src=s.img;}else{img.removeAttribute('src');img.style.display='none';}
+  if(s.img&&img.complete&&img.naturalWidth&&s.tap) placeTap(s.tap);
+}
+function toggleVideo(){
+  if(!DATA.video)return;
+  var vid=document.getElementById('dt-video'), img=document.getElementById('dt-img'),
+      tap=document.getElementById('dt-tap'), btn=document.getElementById('dt-rec-btn');
+  videoMode=!videoMode;
+  if(videoMode){
+    if(!vid.getAttribute('src')) vid.src=DATA.video;
+    img.style.display='none'; tap.hidden=true; vid.hidden=false;
+    if(btn)btn.classList.add('on');
+    vid.parentElement.style.aspectRatio='9/19.5';
+    vid.ontimeupdate=function(){
+      var idx=videoTimeToStep(vid.currentTime,vid.duration);
+      if(idx!==curStep){ curStep=idx; highlightStep(idx); renderInspector(DATA.steps[idx]); }
+    };
+    vid.play().catch(function(){});
+  }else{
+    vid.pause(); vid.hidden=true; img.style.display='';
+    if(btn)btn.classList.remove('on');
+    selectStep(curStep);
+  }
+}
+document.addEventListener('keydown',function(e){
+  if(!DATA.steps.length)return;
+  if(e.key==='Escape'){location.href='/';return;}
+  if(e.key==='ArrowDown'||e.key==='ArrowRight'){e.preventDefault();if(curStep<DATA.steps.length-1)selectStep(curStep+1);}
+  else if(e.key==='ArrowUp'||e.key==='ArrowLeft'){e.preventDefault();if(curStep>0)selectStep(curStep-1);}
+});
+(function(){
+  if(!DATA.steps.length)return;
+  var m=(location.hash||'').match(/^#step-(\\d+)$/);
+  var initial=0;
+  if(m){var n=+m[1]-1; if(n>=0&&n<DATA.steps.length) initial=n;}
+  selectStep(initial);
+})();
+`;
+}
+
+/* ─── shared JSON embed ─────────────────────────────────────────── */
+
+function embedJson(data: unknown): string {
+  return JSON.stringify(data).replace(/</g, '\\u003c');
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+ * styles — mirrors src/runner/suite-report.ts palette + adds bits
+ * needed only in server mode (analytics cards, platform chips,
+ * clear-filters button, standalone-group heading).
+ * ═══════════════════════════════════════════════════════════════════ */
+
+function styles(): string {
+  return `
+:root{
+  --bg:#0b0e13; --panel:#161a22; --panel-2:#1b2029; --line:#272d37;
+  --ink:#e6eaf1; --muted:#919aab; --faint:#5b6473;
+  --brand:#19d4ec; --brand-soft:rgba(25,212,236,.14); --brand-rgb:25,212,236;
+  --pass:#3ddc97; --fail:#f0596a; --skip:#6b7280; --flaky:#f0b429;
+  --r:16px;
+}
+/* pre-body class flip (so light-mode users don't flash dark first) */
+html.preload-light body{background:#f3f6f8;color:#15202c}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  margin:0;background:
+    radial-gradient(1100px 520px at 82% -8%, rgba(25,212,236,.10), transparent 60%),
+    radial-gradient(900px 600px at -5% 0%, rgba(99,102,241,.07), transparent 55%),
+    var(--bg);
+  color:var(--ink);
+  font-family:"Inter",ui-sans-serif,system-ui,-apple-system,sans-serif;
+  font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased;
+  min-height:100vh;
+}
+body.is-failed{--brand:var(--fail);--brand-soft:rgba(240,89,106,.14);--brand-rgb:240,89,106}
+.grain{position:fixed;inset:0;pointer-events:none;z-index:0;opacity:.035;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");}
+main{position:relative;z-index:1;max-width:1560px;margin:0 auto;padding:40px 32px 80px}
+code{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:.85em}
+
+.reveal{opacity:0;transform:translateY(14px);animation:rise .7s cubic-bezier(.2,.7,.2,1) forwards}
+.cockpit{animation-delay:0s}.dash-body{animation-delay:.12s}.results{animation-delay:.18s}.footer{animation-delay:.24s}
+@keyframes rise{to{opacity:1;transform:none}}
+
+body.light{
+  --bg:#f3f6f8; --panel:#ffffff; --panel-2:#eef2f6; --line:#dce2ea;
+  --ink:#15202c; --muted:#5c6675; --faint:#97a1ae;
+  --brand:#0a97ad; --brand-soft:rgba(10,151,173,.12); --brand-rgb:10,151,173;
+  --pass:#13a06a; --fail:#e0485f; --skip:#8a909c; --flaky:#c08400;
+  background:radial-gradient(1100px 520px at 82% -8%, rgba(10,151,173,.07), transparent 60%),#f3f6f8;
+  color:var(--ink);
+}
+body.light.is-failed{--brand:#e0485f;--brand-soft:rgba(224,72,95,.1);--brand-rgb:224,72,95}
+body.light .grain{opacity:.015}
+body.light .suite{background:linear-gradient(180deg,#13161d,#454c5a);-webkit-background-clip:text;background-clip:text}
+body.light .donut-track{stroke:rgba(0,0,0,.08)}
+body.light .cockpit{box-shadow:0 24px 60px -42px rgba(20,30,60,.3)}
+body.light .chip{background:rgba(0,0,0,.02)}
+
+.theme-toggle{position:fixed;top:18px;right:18px;z-index:40;width:40px;height:40px;border-radius:11px;
+  border:1px solid var(--line);background:var(--panel);color:var(--ink);font-size:17px;cursor:pointer;
+  display:grid;place-items:center;transition:.15s;box-shadow:0 6px 18px -10px rgba(0,0,0,.5)}
+.theme-toggle:hover{border-color:var(--brand);color:var(--brand)}
+
+/* ── cockpit: hero + mini-stats + analytics fused into one dense strip ── */
+.cockpit{border:1px solid var(--line);border-radius:22px;overflow:hidden;position:relative;
+  background:linear-gradient(160deg,var(--panel-2),var(--panel));
+  box-shadow:0 30px 80px -40px rgba(0,0,0,.8)}
+.cockpit::before{content:"";position:absolute;top:0;left:0;right:0;height:1px;
+  background:linear-gradient(90deg,transparent,rgba(var(--brand-rgb),.55),transparent);opacity:.75}
+.cockpit::after{content:"";position:absolute;inset:0;pointer-events:none;
+  background:linear-gradient(90deg,rgba(var(--brand-rgb),.06),transparent 40%);opacity:.9}
+.cockpit-rule{height:1px;background:var(--line);opacity:.55;margin:0 24px}
+
+/* hero row inside the cockpit — 3 columns: title │ mini-stats │ donut+verdict */
+.hero-strip{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:26px;align-items:stretch;
+  padding:22px 26px 20px;position:relative;z-index:1}
+.hero-left{min-width:0;display:flex;flex-direction:column;justify-content:space-between;gap:10px}
+.brand{font-family:"JetBrains Mono",monospace;font-size:12px;letter-spacing:.18em;
+  text-transform:uppercase;color:var(--muted);display:flex;align-items:center;gap:8px}
+.brand-mark{color:var(--brand);font-size:14px}
+.brand-sub{color:var(--faint)}
+.suite{font-family:"Plus Jakarta Sans",sans-serif;font-weight:800;
+  font-size:clamp(28px,3vw,40px);line-height:1.05;letter-spacing:-.02em;margin:8px 0 12px;
+  background:linear-gradient(180deg,#fff,#c8cbd6);-webkit-background-clip:text;background-clip:text;color:transparent;
+  overflow-wrap:anywhere}
+.hero-meta{display:flex;flex-wrap:wrap;gap:7px}
+.chip{font-family:"JetBrains Mono",monospace;font-size:12.5px;padding:4px 11px;border-radius:999px;
+  border:1px solid var(--line);background:rgba(255,255,255,.02);color:var(--muted);text-decoration:none}
+.chip.plat{text-transform:uppercase;letter-spacing:.06em;color:var(--ink);border-color:var(--brand);background:var(--brand-soft);display:inline-flex;align-items:center;gap:6px}
+.chip.plat svg{width:12px;height:12px}
+.chip.chip-fail{color:var(--fail);border-color:rgba(240,89,106,.4)}
+.chip.chip-spec{color:var(--brand);border-color:rgba(var(--brand-rgb),.35);background:var(--brand-soft)}
+
+.hero-right{display:flex;align-items:stretch;gap:18px;flex-shrink:0;border-left:1px solid var(--line);padding-left:18px}
+
+/* mini-stats: 3×2 grid of gauge cells */
+.hero-mstats{display:grid;grid-template-columns:repeat(3,minmax(88px,1fr));align-items:center}
+.mstat{position:relative;padding:6px 14px;border-right:1px solid var(--line)}
+.hero-mstats > .mstat:nth-child(3n){border-right:none}
+.hero-mstats > .mstat:nth-child(-n+3){border-bottom:1px solid var(--line);padding-bottom:10px}
+.hero-mstats > .mstat:nth-child(n+4){padding-top:10px}
+.mstat-value{font-family:"JetBrains Mono",monospace;font-weight:700;font-size:22px;line-height:1;
+  letter-spacing:-.02em;font-variant-numeric:tabular-nums;color:var(--ink)}
+.mstat-label{font-family:"JetBrains Mono",monospace;font-size:10.5px;text-transform:uppercase;
+  letter-spacing:.16em;color:var(--muted);margin-top:7px}
+.mstat-bar{display:block;margin-top:8px;height:2px;background:rgba(255,255,255,.05);border-radius:1px;position:relative;overflow:hidden}
+.mstat-bar-fill{position:absolute;left:0;top:0;bottom:0;background:var(--bar,var(--faint));border-radius:1px;
+  transform-origin:left;animation:barGrow .9s cubic-bezier(.3,.8,.3,1) .3s both}
+.mstat-bar-static{background:linear-gradient(90deg,rgba(255,255,255,.06),transparent)}
+@keyframes barGrow{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+.mstat.tone-pass{--bar:var(--pass)}.mstat.tone-pass .mstat-value{color:var(--pass)}
+.mstat.tone-fail{--bar:var(--fail)}.mstat.tone-fail .mstat-value{color:var(--fail)}
+.mstat.tone-flaky{--bar:var(--flaky)}.mstat.tone-flaky .mstat-value{color:var(--flaky)}
+.mstat.tone-skip{--bar:var(--skip)}.mstat.tone-skip .mstat-value{color:var(--skip)}
+.mstat.tone-neutral{--bar:rgba(var(--brand-rgb),.65)}
+.mstat.tone-muted{--bar:var(--faint)}
+.mstat.tone-muted .mstat-value{color:var(--faint)}
+.mstat.tone-muted .mstat-bar-fill{opacity:.35}
+
+/* donut + verdict pinned to the far right */
+.hero-summary{display:flex;flex-direction:column;align-items:center;gap:10px;flex-shrink:0;border-left:1px solid var(--line);padding-left:18px;justify-content:center}
+.donut{position:relative;width:84px;height:84px}
+.donut svg{transform:rotate(-90deg);width:84px;height:84px}
+.donut circle{fill:none;stroke-width:8;stroke-linecap:round}
+.donut-track{stroke:rgba(255,255,255,.06)}
+.donut-value{stroke:var(--pass);stroke-dasharray:var(--circ);stroke-dashoffset:var(--circ);
+  animation:draw 1.1s cubic-bezier(.3,.8,.3,1) .25s forwards}
+body.is-failed .donut-value{stroke:var(--fail)}
+@keyframes draw{to{stroke-dashoffset:calc(var(--circ) - var(--dash))}}
+.donut-center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.rate{font-family:"JetBrains Mono",monospace;font-weight:700;font-size:20px;line-height:1;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.rate span{font-size:11px;color:var(--muted);margin-left:1px}
+.rate-label{font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint);margin-top:2px}
+.verdict{display:inline-flex;align-items:center;gap:7px;font-family:"JetBrains Mono",monospace;
+  font-weight:700;font-size:12.5px;letter-spacing:.14em;padding:5px 12px;border-radius:9px;border:1px solid var(--line);text-transform:uppercase}
+.verdict .dot{width:7px;height:7px;border-radius:50%}
+.verdict-sub{font-size:11.5px;font-weight:500;color:var(--muted);letter-spacing:.02em}
+.verdict-passed{color:var(--pass);border-color:rgba(61,220,151,.35)}.verdict-passed .dot{background:var(--pass);box-shadow:0 0 10px var(--pass)}
+.verdict-failed{color:var(--fail);border-color:rgba(240,89,106,.35)}.verdict-failed .dot{background:var(--fail);box-shadow:0 0 10px var(--fail)}
+.verdict-empty{color:var(--muted)}.verdict-empty .dot{background:var(--muted)}
+
+/* analytics — sits inside the cockpit, below the hero-strip */
+.analytics{display:grid;grid-template-columns:1.5fr 1fr 1fr;gap:0;padding:14px 24px 18px;position:relative;z-index:1}
+.ana-card{padding:6px 20px;position:relative;border-right:1px solid var(--line)}
+.ana-card:last-child{border-right:none;padding-right:6px}
+.ana-card:first-child{padding-left:6px}
+.ana-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.ana-label{font-family:"JetBrains Mono",monospace;font-size:10.5px;text-transform:uppercase;letter-spacing:.16em;color:var(--muted);font-weight:600;margin-bottom:10px;display:block}
+.ana-legend{display:flex;gap:10px;font-size:11.5px;color:var(--muted)}
+.ana-dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:4px;vertical-align:middle}
+.ana-spark{width:100%}
+.ana-empty{padding:12px 4px;color:var(--faint);font-size:13px}
+.plat-labels{display:flex;justify-content:space-between;align-items:center;font-size:13.5px;color:var(--muted);margin-bottom:10px}
+.plat-labels svg{vertical-align:middle;margin-right:4px}
+.plat-labels strong{color:var(--ink);margin-left:4px}
+.plat-bar{height:8px;border-radius:999px;overflow:hidden;background:var(--panel-2);display:flex}
+.plat-bar > .plat-android{background:var(--brand);height:100%}
+.plat-bar > .plat-ios{background:rgba(var(--brand-rgb),.45);height:100%}
+.failing-list{display:flex;flex-direction:column;gap:8px}
+.failing-row{display:grid;grid-template-columns:1fr 60px auto;gap:8px;align-items:center}
+.failing-name{font-family:"JetBrains Mono",monospace;font-size:12.5px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.failing-bar-wrap{height:7px;border-radius:999px;background:var(--panel-2);overflow:hidden}
+.failing-bar{height:100%;background:var(--fail);opacity:.85;border-radius:999px}
+.failing-count{font-family:"JetBrains Mono",monospace;font-size:11.5px;color:var(--muted)}
+
+/* ── dashboard body: sidebar + main results ── */
+.dash-body{display:grid;grid-template-columns:320px minmax(0,1fr);gap:20px;margin-top:22px;align-items:start}
+.dash-side{position:sticky;top:20px}
+.dash-main{min-width:0}
+.dash-card{border:1px solid var(--line);border-radius:16px;background:var(--panel);padding:18px 20px;position:relative;overflow:hidden}
+.dash-card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--brand);opacity:.55}
+.side-title{font-family:"Plus Jakarta Sans",sans-serif;font-weight:700;font-size:15px;
+  margin:0 0 14px;display:flex;align-items:center;gap:8px;padding-left:6px}
+.side-title .count{font-family:"JetBrains Mono",monospace;font-size:11.5px;color:var(--muted);
+  border:1px solid var(--line);border-radius:999px;padding:2px 9px}
+.sidedev-list{display:flex;flex-direction:column;gap:12px;padding-left:6px}
+.sidedev{display:flex;flex-direction:column;gap:6px;padding:10px 12px;border:1px solid var(--line);
+  border-radius:11px;background:rgba(255,255,255,.015)}
+.sidedev-head{display:flex;align-items:center;gap:8px}
+.sidedev-plat{color:var(--muted);display:inline-flex}
+.sidedev-plat svg{width:12px;height:12px}
+.sidedev-name{font-family:"JetBrains Mono",monospace;font-size:13px;font-weight:600;color:var(--ink);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sidedev-count{font-family:"JetBrains Mono",monospace;font-size:11.5px;color:var(--muted);
+  border:1px solid var(--line);border-radius:999px;padding:1px 8px}
+.sidedev-bar{height:3px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden}
+.sidedev-bar-pass{display:block;height:100%;background:var(--pass);border-radius:2px;
+  transform-origin:left;animation:barGrow .8s cubic-bezier(.3,.8,.3,1) .35s both}
+.sidedev-stats{display:flex;align-items:center;gap:10px;font-family:"JetBrains Mono",monospace;font-size:11.5px}
+.sidedev-stats .pass{color:var(--pass);font-weight:600}
+.sidedev-stats .fail{color:var(--fail);font-weight:600}
+.sidedev-dur{margin-left:auto}
+
+/* section titles used inside the main pane */
+.section-title{font-family:"Plus Jakarta Sans",sans-serif;font-weight:700;font-size:20px;
+  margin:0 0 16px;display:flex;align-items:center;gap:10px}
+.section-title .count,.file-count{font-family:"JetBrains Mono",monospace;font-size:12px;color:var(--muted);
+  border:1px solid var(--line);border-radius:999px;padding:2px 9px}
+.devices{margin-top:36px}
+.device-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px}
+.device-card{display:flex;gap:12px;align-items:center;border:1px solid var(--line);border-radius:14px;
+  padding:12px 14px;background:var(--panel)}
+.device-frame-mini{width:26px;height:44px;border-radius:6px;border:2px solid var(--faint);flex-shrink:0;position:relative;
+  background:linear-gradient(160deg,#222838,#11141c)}
+.device-frame-mini::after{content:"";position:absolute;left:50%;top:4px;transform:translateX(-50%);width:8px;height:2px;border-radius:2px;background:var(--faint)}
+.device-name{font-family:"JetBrains Mono",monospace;font-size:13px;font-weight:600;display:flex;align-items:center;gap:6px}
+.device-os{color:var(--muted);font-weight:500;font-size:11px}
+.device-os svg{vertical-align:middle}
+.device-stats{display:flex;gap:10px;font-size:12px;margin-top:3px}
+.device-stats .pass{color:var(--pass)}.device-stats .fail{color:var(--fail)}.faint{color:var(--faint)}
+
+/* results */
+.results-head{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:18px}
+.results-head .section-title{margin:0}
+.controls{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.search{font-family:"JetBrains Mono",monospace;font-size:13px;background:var(--panel);border:1px solid var(--line);
+  color:var(--ink);padding:8px 13px;border-radius:10px;width:190px;outline:none}
+.search:focus{border-color:var(--brand)}
+.filters{display:flex;gap:4px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:3px}
+.filter,.filter-chip{font-family:"Inter",sans-serif;font-size:13px;font-weight:500;color:var(--muted);background:none;
+  border:none;padding:6px 13px;border-radius:7px;cursor:pointer;transition:.15s;display:inline-flex;align-items:center;gap:5px}
+.filter:hover,.filter-chip:hover{color:var(--ink)}
+.filter.active,.filter-chip.active{background:var(--brand);color:#04222a;font-weight:600}
+.filter-chip svg{width:12px;height:12px}
+.filter-clear{font-family:"Inter",sans-serif;font-size:12.5px;color:var(--muted);background:var(--panel);
+  border:1px solid var(--line);border-radius:10px;padding:7px 12px;cursor:pointer;transition:.15s}
+.filter-clear:hover{color:var(--ink);border-color:var(--brand)}
+
+.file-group{margin-bottom:20px}
+.file-head{display:flex;align-items:center;gap:10px;padding:10px 4px;border-bottom:1px solid var(--line);margin-bottom:8px;user-select:none}
+.file-icon{color:var(--brand);display:inline-block}
+.file-path{font-family:"JetBrains Mono",monospace;font-size:13px;color:var(--ink);font-weight:500}
+.file-badge{font-size:11px;padding:2px 9px;border-radius:999px;font-weight:600}
+.file-badge.all-pass{color:var(--pass);background:rgba(61,220,151,.1)}
+.file-badge.has-fail{color:var(--fail);background:rgba(240,89,106,.1)}
+.file-count{margin-left:auto}
+
+.test{width:100%;display:flex;align-items:center;gap:13px;padding:14px 16px;text-align:left;
+  border:1px solid var(--line);border-radius:13px;background:var(--panel);margin-bottom:8px;cursor:pointer;
+  color:var(--ink);font-family:inherit;font-size:14.5px;transition:border-color .2s,transform .12s,background .2s;text-decoration:none}
+.test.status-failed{border-color:rgba(240,89,106,.35)}
+.test:hover{border-color:var(--brand);background:var(--panel-2);transform:translateX(2px)}
+.status-glyph{width:22px;height:22px;border-radius:7px;display:grid;place-items:center;font-size:12px;flex-shrink:0;font-weight:700}
+.s-passed{background:rgba(61,220,151,.16);color:var(--pass)}
+.s-failed{background:rgba(240,89,106,.16);color:var(--fail)}
+.s-skipped{background:rgba(107,114,128,.16);color:var(--skip)}
+.test-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
+.test-tags{display:flex;gap:6px;align-items:center;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end}
+.tag{font-family:"JetBrains Mono",monospace;font-size:11px;padding:3px 8px;border-radius:6px;border:1px solid var(--line);color:var(--muted);white-space:nowrap;display:inline-flex;align-items:center;gap:4px}
+.tag svg{width:11px;height:11px}
+.tag-device{color:var(--ink)}
+.tag-plat{text-transform:uppercase;letter-spacing:.05em}
+.tag-time{color:var(--brand);border-color:rgba(var(--brand-rgb),.3)}
+.tag-when{color:var(--faint)}
+.tag.all-pass{color:var(--pass);border-color:rgba(61,220,151,.3)}
+.tag.has-fail{color:var(--fail);border-color:rgba(240,89,106,.35)}
+.suite-row .test-title{font-weight:600}
+.chevron{color:var(--faint);font-size:20px;transition:transform .15s,color .15s}
+.test:hover .chevron{color:var(--brand);transform:translateX(3px)}
+
+.error-box{border:1px solid rgba(240,89,106,.3);border-radius:10px;background:rgba(240,89,106,.06);padding:12px 14px;margin:8px 0 14px}
+.error-label{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--fail);font-weight:600;margin-bottom:6px}
+.error-msg{font-family:"JetBrains Mono",monospace;font-size:12.5px;color:#ffd2d9;margin:0;white-space:pre-wrap;word-break:break-word}
+body.light .error-msg{color:#7a1a2a}
+
+/* phone frame */
+.phone{display:block;padding:6px;border-radius:18px;background:linear-gradient(160deg,#262d3e,#0f121a);
+  border:1px solid #313a4f;box-shadow:0 14px 30px -16px rgba(0,0,0,.9)}
+.phone-screen{position:relative;display:block;border-radius:13px;overflow:hidden;background:#000;aspect-ratio:9/19.5}
+.phone-screen img{width:100%;height:100%;object-fit:cover;display:block}
+.tap{position:absolute;width:26px;height:26px;border-radius:50%;transform:translate(-50%,-50%);
+  border:2px solid var(--brand);background:rgba(var(--brand-rgb),.25);box-shadow:0 0 0 0 rgba(var(--brand-rgb),.5);
+  animation:tap 1.8s ease-out infinite;pointer-events:none}
+@keyframes tap{0%{box-shadow:0 0 0 0 rgba(var(--brand-rgb),.5)}70%{box-shadow:0 0 0 16px rgba(var(--brand-rgb),0)}100%{box-shadow:0 0 0 0 rgba(var(--brand-rgb),0)}}
+
+/* detail view (per-run Step Inspector) */
+.detail{max-width:1280px}
+.dt-top{display:flex;flex-wrap:wrap;align-items:center;gap:14px;margin-bottom:8px}
+.dt-back{font-family:"JetBrains Mono",monospace;font-size:13px;color:var(--muted);background:var(--panel);
+  border:1px solid var(--line);border-radius:9px;padding:8px 14px;cursor:pointer;transition:.15s;text-decoration:none}
+.dt-back:hover{color:var(--ink);border-color:var(--brand)}
+.dt-title{font-family:"Plus Jakarta Sans",sans-serif;font-weight:800;font-size:clamp(22px,3vw,32px);
+  letter-spacing:-.01em;margin:0;flex:1;min-width:200px}
+.dt-verdict{font-family:"Plus Jakarta Sans",sans-serif;font-weight:800;letter-spacing:.04em;font-size:15px;
+  padding:6px 14px;border-radius:10px;border:1px solid var(--line);text-transform:uppercase}
+.dt-verdict.v-passed{color:var(--pass);border-color:rgba(61,220,151,.4)}
+.dt-verdict.v-failed{color:var(--fail);border-color:rgba(240,89,106,.4)}
+.dt-verdict.v-skipped{color:var(--skip)}
+.dt-meta{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 18px}
+.dt-rec{color:var(--brand);cursor:pointer;font-family:inherit;border-color:rgba(var(--brand-rgb),.35)!important}
+.dt-rec:hover{background:var(--brand-soft)}
+.dt-rec.on{background:var(--brand);color:#04222a;border-color:var(--brand)!important}
+.dt-video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:block;background:#000}
+.dt-video[hidden]{display:none}
+
+.dt-logs{margin-top:20px}
+.dt-logs-head{font-family:"JetBrains Mono",monospace;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--faint);margin-bottom:10px}
+.logblk{border:1px solid var(--line);border-radius:12px;background:var(--panel);margin-bottom:10px;overflow:hidden}
+.logblk>summary{cursor:pointer;padding:11px 14px;font-size:13px;font-weight:600;list-style:none;user-select:none}
+.logblk>summary::-webkit-details-marker{display:none}
+.logblk>summary::before{content:'▸';display:inline-block;margin-right:8px;color:var(--faint);transition:transform .15s}
+.logblk[open]>summary::before{transform:rotate(90deg)}
+.logsub{font-weight:400;color:var(--faint);font-size:11px}
+.logpre{margin:0;padding:14px;border-top:1px solid var(--line);background:var(--bg);font-family:"JetBrains Mono",monospace;font-size:12px;line-height:1.55;color:var(--muted);white-space:pre-wrap;word-break:break-word;max-height:340px;overflow:auto}
+
+.dt-grid{display:grid;grid-template-columns:300px 1fr 320px;gap:20px;align-items:start}
+.dt-panel{border:1px solid var(--line);border-radius:16px;background:var(--panel);overflow:hidden}
+.dt-steps-head,.dt-insp-head{font-family:"JetBrains Mono",monospace;font-size:11px;text-transform:uppercase;
+  letter-spacing:.12em;color:var(--muted);padding:14px 16px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between}
+.dt-steps{padding:6px;max-height:74vh;overflow:auto}
+.dt-step{display:flex;align-items:center;gap:11px;width:100%;text-align:left;padding:11px 12px;border:1px solid transparent;
+  border-radius:10px;background:none;color:var(--ink);cursor:pointer;font-family:inherit;font-size:13.5px;transition:.12s}
+.dt-step:hover{background:var(--panel-2)}
+.dt-step.active{background:rgba(var(--brand-rgb),.1);border-color:rgba(var(--brand-rgb),.4)}
+.dt-step-n{width:24px;height:24px;border-radius:7px;flex-shrink:0;display:grid;place-items:center;font-size:11px;font-weight:700;
+  font-family:"JetBrains Mono",monospace;background:var(--panel-2);border:1px solid var(--line);color:var(--muted)}
+.dt-step.s-passed .dt-step-n{color:var(--pass);border-color:rgba(61,220,151,.4)}
+.dt-step.s-failed .dt-step-n{color:var(--fail);border-color:rgba(240,89,106,.5)}
+.dt-step-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.dt-step-desc{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
+.dt-step-kind{font-family:"JetBrains Mono",monospace;font-size:10px;text-transform:uppercase;color:var(--faint);margin-top:2px}
+.dt-step-time{font-family:"JetBrains Mono",monospace;font-size:11px;color:var(--faint);flex-shrink:0}
+
+.dt-stage{display:flex;justify-content:center;padding:8px}
+.phone.big{padding:9px;border-radius:30px}
+.phone.big .phone-screen{border-radius:22px;height:min(72vh,660px);aspect-ratio:9/19.5}
+.phone.big .phone-screen img{object-fit:contain}
+
+.dt-insp{padding:6px 4px}
+.insp-row{padding:13px 16px;border-bottom:1px solid var(--line)}
+.insp-row:last-child{border-bottom:none}
+.insp-label{font-family:"JetBrains Mono",monospace;font-size:10px;text-transform:uppercase;letter-spacing:.12em;color:var(--faint);margin-bottom:6px}
+.insp-val{font-size:14px;color:var(--ink);word-break:break-word;line-height:1.45}
+.insp-val.mono{font-family:"JetBrains Mono",monospace;font-size:13px}
+.insp-pill{display:inline-block;font-family:"JetBrains Mono",monospace;font-size:11px;text-transform:uppercase;letter-spacing:.06em;
+  padding:3px 10px;border-radius:6px;border:1px solid var(--line)}
+.insp-pill.s-passed{color:var(--pass);border-color:rgba(61,220,151,.4)}
+.insp-pill.s-failed{color:var(--fail);border-color:rgba(240,89,106,.4)}
+.dt-noshot{display:grid;place-items:center;height:100%;color:var(--faint);font-style:italic}
+@media(max-width:960px){.dt-grid{grid-template-columns:1fr}.phone.big .phone-screen{height:auto;max-height:70vh}}
+
+.empty{text-align:center;color:var(--faint);padding:50px;font-style:italic}
+
+.footer{margin-top:48px;padding-top:20px;border-top:1px solid var(--line);display:flex;
+  justify-content:space-between;gap:16px;flex-wrap:wrap;font-size:12.5px;color:var(--muted)}
+.footer code{color:var(--faint)}
+.footer strong{color:var(--brand);font-weight:600}
+
+@media(max-width:1200px){
+  .dash-body{grid-template-columns:1fr}
+  .dash-side{position:static}
+  .hero-strip{grid-template-columns:1fr;gap:16px}
+  .hero-right{border-left:none;padding-left:0;padding-top:16px;border-top:1px solid var(--line);align-items:center;justify-content:space-between}
+  .hero-mstats{flex:1}
+  .analytics{grid-template-columns:1fr;gap:16px 0;padding:14px 22px 18px}
+  .ana-card{border-right:none;padding:12px 6px;border-bottom:1px solid var(--line)}
+  .ana-card:last-child{border-bottom:none}
+}
+@media(max-width:720px){
+  .hero-right{flex-direction:column;align-items:stretch}
+  .hero-summary{border-left:none;padding-left:0;border-top:1px solid var(--line);padding-top:10px;flex-direction:row;justify-content:space-between}
+  .hero-mstats{grid-template-columns:repeat(3,1fr)}
+}
+`;
 }

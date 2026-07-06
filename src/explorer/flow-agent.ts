@@ -62,7 +62,8 @@ Your job:
 6. Call save_flow once per flow. Stop when the tool returns remaining: 0`;
 
 type ContentPart =
-  { type: 'text'; text: string } | { type: 'image'; image: string; mimeType: string };
+  | { type: 'text'; text: string }
+  | { type: 'image'; image: string; mimeType: string };
 
 function buildPromptParts(
   analysis: PRDAnalysis,

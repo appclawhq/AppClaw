@@ -62,7 +62,10 @@ function cloudOptionsCaps(): Record<string, unknown> {
 }
 
 export default defineConfig({
+  suiteName: `${new Date().toISOString()} + AppClaw Runner`,
   video: true,
+  waitTimeout: 3000,
+  waitInterval: 800,
   testDir: 'tests',
   // Cloud specs need a provider hub — leave them out of a local run's
   // discovery (`appclaw test` with no CLOUD_PROVIDER set). The cloud CI sets

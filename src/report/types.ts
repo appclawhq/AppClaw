@@ -94,6 +94,14 @@ export interface RunManifest {
   phaseResults?: PhaseResultRecord[];
   /** Per-step artifacts with screenshots */
   steps: StepArtifact[];
+  /**
+   * Spec file the test was declared in (relative to cwd, e.g.
+   * "tests/login.spec.ts"). Present for runner-driven tests; absent for
+   * standalone `new AppClaw(...)` scripts that don't set `reportFile`.
+   */
+  specFile?: string;
+  /** Runner hooks that fired around this test (deviceSetup, beforeAll, beforeEach, afterEach). */
+  hooks?: HookRecord[];
   /** Relative path to the screen recording (e.g. "recording.mp4") */
   videoPath?: string;
   /**
@@ -117,6 +125,35 @@ export interface PhaseResultRecord {
   reason?: string;
 }
 
+/**
+ * A single runner-lifecycle hook execution — captured around the test so the
+ * report can show the same story a developer would tell debugging: what set up,
+ * what tore down, and whether any of it failed.
+ */
+export type HookKind =
+  | 'globalSetup'
+  | 'deviceSetup'
+  | 'beforeAll'
+  | 'beforeEach'
+  | 'afterEach'
+  | 'afterAll'
+  | 'globalTeardown';
+
+export interface HookRecord {
+  kind: HookKind;
+  /** Scope this hook is attached to — file path, describe title, or omitted for global. */
+  scope?: string;
+  status: 'passed' | 'failed';
+  durationMs: number;
+  error?: string;
+  /**
+   * Console output captured during the hook (one line per console.log / warn
+   * / error / info / debug call). Non-log levels are prefixed with `[level]`.
+   * Omitted when the hook produced no output.
+   */
+  logs?: string;
+}
+
 /* ─── Run index (global index file) ──────────────────────── */
 
 export interface RunIndexEntry {
@@ -136,6 +173,8 @@ export interface RunIndexEntry {
   suiteId?: string;
   /** Human-readable suite name */
   suiteName?: string;
+  /** Spec file the test was declared in (e.g. "tests/login.spec.ts"). */
+  specFile?: string;
 }
 
 export interface SuiteEntry {

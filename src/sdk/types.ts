@@ -134,6 +134,12 @@ export interface AppClawOptions {
   /** Human-readable suite name (shown in the suite report). */
   reportSuiteName?: string;
   /**
+   * Spec file this test lives in (e.g. "tests/login.spec.ts") — surfaces in
+   * the report so runs can be grouped by their source file. The AppClaw runner
+   * sets this per test; standalone SDK scripts can leave it unset.
+   */
+  reportFile?: string;
+  /**
    * Record the screen during the run and embed the video in the report.
    * Requires Appium to support `appium_screen_recording`. Default: false.
    */

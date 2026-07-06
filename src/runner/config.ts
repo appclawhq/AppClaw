@@ -94,6 +94,7 @@ export function resolveConfig(fileConfig: RunnerConfig, cli: CliOverrides = {}):
     node,
     reporter,
     reportDir,
+    suiteName,
     globalSetup,
     globalTeardown,
     deviceSetup,
@@ -124,6 +125,7 @@ export function resolveConfig(fileConfig: RunnerConfig, cli: CliOverrides = {}):
     appOptions: { ...appOptions, platform },
     reporter: cli.reporter ?? asArray(reporter) ?? DEFAULTS.reporter,
     reportDir: reportDir ?? DEFAULTS.reportDir,
+    suiteName: suiteName ?? 'AppClaw Runner',
 
     grep: cli.grep,
     grepInvert: cli.grepInvert,

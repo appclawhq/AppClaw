@@ -19,8 +19,12 @@
  * deliberately deferred. This is the seam.
  */
 
+import * as path from 'node:path';
 import { AppClaw } from '../sdk/index.js';
 import type { AppClawOptions } from '../sdk/types.js';
+import type { HookKind, HookRecord } from '../report/types.js';
+import { captureHookLogs } from './hook-logger.js';
+import { appendHooksToManifest } from '../report/writer.js';
 import { startLocalSSENode, type SSENode } from './node-local.js';
 import { discoverPool } from './pool.js';
 import {
@@ -56,6 +60,50 @@ interface WorkerScopeState {
   entered: string[];
 }
 
+/**
+ * Trim a scope title for the report. File-scope scopes carry an absolute path
+ * ("/Users/.../tests/login.spec.ts") which is noise in the UI — collapse it to
+ * a project-relative path. Describe titles ("Login", "checkout > coupon flow")
+ * pass through unchanged. Non-string / missing → undefined.
+ */
+function scopeTitle(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  if (raw === '<root>') return undefined;
+  // Heuristic: only file paths contain a `/` and look like a filesystem path.
+  // Describe labels typically don't. Cheap check, correct for the shapes users
+  // actually pass.
+  if (raw.includes('/') || raw.includes('\\')) {
+    const rel = path.relative(process.cwd(), raw);
+    // If the relative path escapes cwd (starts with `..`) the absolute path
+    // was outside the project — fall back to the basename to stay compact.
+    return rel && !rel.startsWith('..') ? rel : path.basename(raw);
+  }
+  return raw;
+}
+
+/**
+ * Wrap a hook call so its outcome (status, duration, error) lands in the
+ * test's run manifest. Rethrows on failure so the caller's existing control
+ * flow (retry, teardown, error bubbling) stays intact.
+ */
+async function recordHook(
+  app: AppClaw,
+  kind: HookKind,
+  scope: string | undefined,
+  fn: () => Promise<void> | void
+): Promise<void> {
+  const t0 = Date.now();
+  const { error, logs: raw } = await captureHookLogs(fn);
+  const durationMs = Date.now() - t0;
+  const logs = raw.trim() || undefined;
+  if (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    app.reportHook({ kind, scope, status: 'failed', durationMs, error: msg, logs });
+    throw error;
+  }
+  app.reportHook({ kind, scope, status: 'passed', durationMs, logs });
+}
+
 export class Runner<State = unknown> {
   readonly config: ResolvedConfig<State>;
   /** Re-exported so programmatic users can register without importing registry. */
@@ -71,10 +119,12 @@ export class Runner<State = unknown> {
   private reporter: RunnerReporter = new PlainReporter();
   /** Suite identity for this run — tags every test's manifest + the report. */
   private suiteId = '';
-  private suiteName = 'AppClaw Runner';
+  private suiteName: string;
 
   constructor(config: ResolvedConfig<State>) {
     this.config = config;
+    // Config-provided `suiteName` wins; `resolveConfig` fills in 'AppClaw Runner' as the default.
+    this.suiteName = config.suiteName;
   }
 
   /** Run all registered (or provided) tests across the device pool. */
@@ -307,6 +357,11 @@ export class Runner<State = unknown> {
       const scopeState: WorkerScopeState = { ranBeforeAll: new Set(), entered: [] };
       // Per-worker cache for worker-scoped fixtures (built once, reused).
       const workerStore = createWorkerStore();
+      // Last-completed run per scope on this worker — the anchor `afterAll`
+      // hooks attach to. Populated after every runOne so scope-drain (which
+      // happens *between* the last test and the next scope's activity) writes
+      // its trail into the last test's manifest instead of vanishing.
+      const lastRunIdByScope = new Map<string, string>();
       while (true) {
         const tc = queue.shift();
         if (!tc) break;
@@ -322,9 +377,12 @@ export class Runner<State = unknown> {
           workerStore
         );
         results.push(result);
+        if (result.runId) {
+          for (const sid of tc.scopeIds) lastRunIdByScope.set(sid, result.runId);
+        }
       }
       // Scope teardown: afterAll for every entered scope, innermost first.
-      await this.runAfterAll(device, state, scopeState);
+      await this.runAfterAll(device, state, scopeState, lastRunIdByScope);
       // Worker-scoped fixture teardown (reverse build order), once per worker.
       await teardownWorkerFixtures(workerStore);
     };
@@ -349,7 +407,7 @@ export class Runner<State = unknown> {
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       const t0 = Date.now();
-      const app = new AppClaw(this.appOptions(device, tc.fullTitle));
+      const app = new AppClaw(this.appOptions(device, tc.fullTitle, tc.file));
       lastRunId = app.runId;
       const ctx: TestContext<State> = {
         state,
@@ -362,7 +420,7 @@ export class Runner<State = unknown> {
       try {
         // Device scope (once per device): deviceSetup.
         if (!setupDone.has(device.udid) && this.config.deviceSetup) {
-          await this.config.deviceSetup(app, ctx);
+          await recordHook(app, 'deviceSetup', undefined, () => this.config.deviceSetup!(app, ctx));
         }
         setupDone.add(device.udid);
 
@@ -373,12 +431,17 @@ export class Runner<State = unknown> {
         for (const sid of tc.scopeIds) {
           if (scopeState.ranBeforeAll.has(sid)) continue;
           const scope = getScope(sid);
-          for (const h of scope?.beforeAll ?? []) await h(app, ctx);
+          const scopeLabel = scopeTitle(scope?.title);
+          for (const h of scope?.beforeAll ?? []) {
+            await recordHook(app, 'beforeAll', scopeLabel, () => h(app, ctx));
+          }
           scopeState.ranBeforeAll.add(sid);
           if (scope?.afterAll.length) scopeState.entered.push(sid);
         }
 
-        if (this.config.beforeEach) await this.config.beforeEach(app, ctx);
+        if (this.config.beforeEach) {
+          await recordHook(app, 'beforeEach', undefined, () => this.config.beforeEach!(app, ctx));
+        }
 
         // Invoke the test. Detect the callback form from its first parameter:
         //  - object pattern `({ app, … })` → build & inject fixtures
@@ -416,7 +479,9 @@ export class Runner<State = unknown> {
         device,
       };
       try {
-        if (this.config.afterEach) await this.config.afterEach(app, info);
+        if (this.config.afterEach) {
+          await recordHook(app, 'afterEach', undefined, () => this.config.afterEach!(app, info));
+        }
       } catch (hookErr) {
         if (!error) error = hookErr instanceof Error ? hookErr : new Error(String(hookErr));
       } finally {
@@ -473,21 +538,51 @@ export class Runner<State = unknown> {
   private async runAfterAll(
     device: Device,
     state: State,
-    scopeState: WorkerScopeState
+    scopeState: WorkerScopeState,
+    lastRunIdByScope: Map<string, string>
   ): Promise<void> {
     for (const sid of [...scopeState.entered].reverse()) {
       const scope = getScope(sid);
       if (!scope?.afterAll.length) continue;
-      const app = new AppClaw(this.appOptions(device, `afterAll:${scope.title}`));
+      // `report: false` on this drain-only AppClaw so it doesn't spawn a
+      // phantom "afterAll:…" run in the global index. We build hook records
+      // manually and attach them to the last-executed test's manifest below.
+      const app = new AppClaw({
+        ...this.appOptions(device, `afterAll:${scope.title}`),
+        report: false,
+      });
       const ctx: TestContext<State> = { state, title: scope.title, retry: 0, device };
+      const label = scopeTitle(scope.title);
+      const records: HookRecord[] = [];
       try {
-        for (const h of scope.afterAll) await h(app, ctx);
-      } catch (err) {
-        // eslint-disable-next-line no-console
-        console.error(`  afterAll "${scope.title}" failed: ${(err as Error).message}`);
+        for (const h of scope.afterAll) {
+          const t0 = Date.now();
+          const { error, logs: raw } = await captureHookLogs(() => h(app, ctx));
+          const durationMs = Date.now() - t0;
+          const logs = raw.trim() || undefined;
+          if (error) {
+            const msg = error instanceof Error ? error.message : String(error);
+            records.push({
+              kind: 'afterAll',
+              scope: label,
+              status: 'failed',
+              durationMs,
+              error: msg,
+              logs,
+            });
+            // eslint-disable-next-line no-console
+            console.error(`  afterAll "${scope.title}" failed: ${msg}`);
+          } else {
+            records.push({ kind: 'afterAll', scope: label, status: 'passed', durationMs, logs });
+          }
+        }
       } finally {
         await app.teardown().catch(() => {});
       }
+      // Attribute to the last test in this scope on this worker so the
+      // manifest reflects the actual execution timeline.
+      const runId = lastRunIdByScope.get(sid);
+      if (runId) await appendHooksToManifest(process.cwd(), runId, records);
     }
   }
 
@@ -512,7 +607,7 @@ export class Runner<State = unknown> {
     });
   }
 
-  private appOptions(device: Device, reportName: string): AppClawOptions {
+  private appOptions(device: Device, reportName: string, reportFile?: string): AppClawOptions {
     const base = this.config.appOptions;
     return {
       // User-provided AppClaw options (provider, model, agentMode, maxSteps,
@@ -531,6 +626,7 @@ export class Runner<State = unknown> {
       reportDevice: device.name,
       reportSuiteId: this.suiteId,
       reportSuiteName: this.suiteName,
+      reportFile: reportFile ? path.relative(process.cwd(), reportFile) || reportFile : undefined,
       // Sensible runner defaults, still overridable by the user's config.
       report: base.report ?? true,
       silent: base.silent ?? true,

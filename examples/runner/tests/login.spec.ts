@@ -1,4 +1,4 @@
-import { test, describe, beforeAll, afterAll } from 'appclaw/runner';
+import { afterAll, beforeAll, describe, test } from 'appclaw/runner';
 import { tapLogin } from './steps.js';
 
 // File-scoped: runs once per device, around all tests in this file.
@@ -15,7 +15,7 @@ describe('Login', () => {
     await app.verify('the list if visible');
   });
 
-  test.ios('toggle slider and verify two green dots are visible', async ({ app }) => {
+  test('toggle slider and verify two green dots are visible', async ({ app }) => {
     await tapLogin(app);
     await app.run('Click on slider');
     await app.verify('two green dot is visisble');

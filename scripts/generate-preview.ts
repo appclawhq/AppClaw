@@ -26,9 +26,10 @@ function isoOffset(offsetMs: number): string {
 
 const mockManifest: RunManifest = {
   runId: '20260705T120000-abc',
-  flowFile: '/flows/login.yaml',
+  flowFile: 'sdk-run',
+  specFile: 'tests/login.spec.ts',
   meta: {
-    name: 'Login Flow',
+    name: 'Login › with valid credentials',
     description: 'Verify user can log in with valid credentials',
   },
   startedAt: isoOffset(45_000),
@@ -100,9 +101,10 @@ const mockManifest: RunManifest = {
 
 const mockFailedManifest: RunManifest = {
   runId: '20260705T110000-def',
-  flowFile: '/flows/checkout.yaml',
+  flowFile: 'sdk-run',
+  specFile: 'tests/checkout.spec.ts',
   meta: {
-    name: 'Checkout Flow',
+    name: 'Checkout › completes purchase from search',
     description: 'Complete a purchase through the cart',
   },
   startedAt: isoOffset(3_600_000 + 60_000),
@@ -189,6 +191,8 @@ const mockFailedManifest: RunManifest = {
   },
 };
 
+const SUITE_ID = 'suite-20260705T115500-preview';
+
 const mockIndex: RunIndex = {
   schemaVersion: 1,
   generatedAt: NOW.toISOString(),
@@ -204,6 +208,9 @@ const mockIndex: RunIndex = {
       stepsExecuted: 5,
       stepsTotal: 5,
       device: mockManifest.device,
+      suiteId: SUITE_ID,
+      suiteName: 'Smoke suite',
+      specFile: 'tests/login.spec.ts',
     },
     {
       runId: mockFailedManifest.runId,
@@ -215,13 +222,16 @@ const mockIndex: RunIndex = {
       success: false,
       stepsExecuted: 3,
       stepsTotal: 6,
-      failedPhase: 'steps',
+      failedPhase: 'test',
       device: mockFailedManifest.device,
+      suiteId: SUITE_ID,
+      suiteName: 'Smoke suite',
+      specFile: 'tests/checkout.spec.ts',
     },
     {
       runId: '20260704T090000-ghi',
-      flowFile: '/flows/login.yaml',
-      flowName: 'Login Flow',
+      flowFile: 'sdk-run',
+      flowName: 'Login › remembers me across relaunch',
       platform: 'android',
       startedAt: isoOffset(86_400_000),
       durationMs: 38_000,
@@ -229,11 +239,12 @@ const mockIndex: RunIndex = {
       stepsExecuted: 5,
       stepsTotal: 5,
       device: 'Pixel 7',
+      specFile: 'tests/login.spec.ts',
     },
     {
       runId: '20260703T150000-jkl',
-      flowFile: '/flows/onboarding.yaml',
-      flowName: 'Onboarding Flow',
+      flowFile: 'sdk-run',
+      flowName: 'Onboarding › first-time user completes tutorial',
       platform: 'ios',
       startedAt: isoOffset(172_800_000),
       durationMs: 120_000,
@@ -241,6 +252,19 @@ const mockIndex: RunIndex = {
       stepsExecuted: 8,
       stepsTotal: 8,
       device: 'iPhone 15 Pro',
+      specFile: 'tests/onboarding.spec.ts',
+    },
+  ],
+  suites: [
+    {
+      suiteId: SUITE_ID,
+      suiteName: 'Smoke suite',
+      platform: 'android',
+      startedAt: isoOffset(3_600_000 + 60_000),
+      durationMs: 3_660_000,
+      runIds: [mockManifest.runId, mockFailedManifest.runId],
+      passedCount: 1,
+      failedCount: 1,
     },
   ],
 };

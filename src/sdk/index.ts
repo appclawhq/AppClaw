@@ -31,6 +31,7 @@ import {
   type GenerateSdkTestConfig,
 } from './goal-export.js';
 import { RunArtifactCollector } from '../report/writer.js';
+import type { HookRecord } from '../report/types.js';
 import { getOsVersion } from '../vision/window-size.js';
 import { silenceTerminalUI } from '../ui/terminal.js';
 import type {
@@ -127,7 +128,8 @@ export class AppClaw {
             (options.platform ?? 'android') as 'android' | 'ios',
             options.reportDevice,
             options.reportSuiteId,
-            options.reportSuiteName
+            options.reportSuiteName,
+            options.reportFile
           )
         : null;
 
@@ -366,6 +368,16 @@ export class AppClaw {
    */
   attachAppiumMcpLog(text: string): void {
     this.collector?.attachAppiumMcpLog(text);
+  }
+
+  /**
+   * Record a runner-lifecycle hook (deviceSetup / beforeAll / beforeEach /
+   * afterEach / afterAll) that fired around this test. The runner wraps each
+   * hook invocation and calls this with timing + status. No-op when reporting
+   * is disabled or the caller is a standalone `new AppClaw(...)` script.
+   */
+  reportHook(record: HookRecord): void {
+    this.collector?.addHook(record);
   }
 
   /**

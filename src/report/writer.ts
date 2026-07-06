@@ -22,6 +22,7 @@ import type {
   SuiteEntry,
   StepArtifact,
   StepStatus,
+  HookRecord,
 } from './types.js';
 import type { FlowMeta, FlowPhase } from '../flow/types.js';
 import type { RunYamlFlowResult } from '../flow/run-yaml-flow.js';
@@ -105,6 +106,7 @@ export class RunArtifactCollector {
   deviceVersion?: string;
   private appiumMcpLog?: string;
   private steps: StepCollectorEntry[] = [];
+  private hooks: HookRecord[] = [];
   private stepTimers = new Map<number, number>();
   private videoBase64: string | undefined;
   private videoFilePath: string | undefined;
@@ -115,10 +117,17 @@ export class RunArtifactCollector {
     readonly platform: 'android' | 'ios',
     readonly device?: string,
     readonly suiteId?: string,
-    readonly suiteName?: string
+    readonly suiteName?: string,
+    /** Spec file this run's test lives in (relative to cwd). */
+    readonly specFile?: string
   ) {
     this.runId = generateRunId();
     this.startedAt = new Date().toISOString();
+  }
+
+  /** Record a runner-lifecycle hook execution. */
+  addHook(record: HookRecord): void {
+    this.hooks.push(record);
   }
 
   /** Mark step as started (for duration tracking). */
@@ -260,6 +269,8 @@ export class RunArtifactCollector {
       phaseResults: result.phaseResults,
       steps: stepArtifacts,
       videoPath,
+      specFile: this.specFile,
+      hooks: this.hooks.length ? this.hooks : undefined,
       failureLogs: this.appiumMcpLog ? { appiumMcp: this.appiumMcpLog } : undefined,
     };
 
@@ -286,6 +297,7 @@ export class RunArtifactCollector {
       device: this.device,
       suiteId: this.suiteId,
       suiteName: this.suiteName,
+      specFile: this.specFile,
     };
     // Prepend (newest first)
     index.runs.unshift(entry);
@@ -316,6 +328,30 @@ export async function loadRunManifest(
 
 export function getArtifactPath(projectRoot: string, runId: string, ...segments: string[]): string {
   return path.join(runsDir(projectRoot), runId, ...segments);
+}
+
+/**
+ * Append hook records to an existing test's manifest on disk. Used by the
+ * runner to attribute `afterAll` hooks (which fire during scope drain, not
+ * around any single test) to the last test in the scope. Silently no-ops if
+ * the manifest file is missing or unreadable — the drain path must never fail
+ * the run.
+ */
+export async function appendHooksToManifest(
+  projectRoot: string,
+  runId: string,
+  hooks: HookRecord[]
+): Promise<void> {
+  if (!hooks.length) return;
+  const manifestPath = path.join(runsDir(projectRoot), runId, 'manifest.json');
+  try {
+    const raw = await fsp.readFile(manifestPath, 'utf-8');
+    const manifest = JSON.parse(raw) as RunManifest;
+    manifest.hooks = [...(manifest.hooks ?? []), ...hooks];
+    await fsp.writeFile(manifestPath, JSON.stringify(manifest, null, 2), 'utf-8');
+  } catch {
+    /* non-fatal: the run finished either way, only the trailing hook trail is missing */
+  }
 }
 
 /** Write (or overwrite) a suite-level aggregate entry in the global index. */

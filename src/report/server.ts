@@ -171,6 +171,28 @@ export function startReportServer(options: ReportServerOptions = {}): http.Serve
         return;
       }
 
+      // ── Suite page (delegates to the self-contained HTML the runner already
+      // writes at `.appclaw/runs/<suiteId>/index.html`). Path traversal is
+      // blocked by asserting the resolved path stays under runs/. ──
+      const suiteMatch = pathname.match(/^\/suites\/([^/]+)\/?$/);
+      if (suiteMatch) {
+        const suiteId = suiteMatch[1];
+        const suiteHtml = path.join(projectRoot, '.appclaw', 'runs', suiteId, 'index.html');
+        const normalized = path.normalize(suiteHtml);
+        const expectedBase = path.join(projectRoot, '.appclaw', 'runs');
+        if (!normalized.startsWith(expectedBase) || !fs.existsSync(normalized)) {
+          respond404(res);
+          return;
+        }
+        res.writeHead(200, {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Cache-Control': 'no-cache',
+          'Access-Control-Allow-Origin': '*',
+        });
+        fs.createReadStream(normalized).pipe(res);
+        return;
+      }
+
       // ── Index page ──
       if (pathname === '/' || pathname === '/index.html') {
         const index = await loadRunIndex(projectRoot);

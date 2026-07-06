@@ -63,6 +63,7 @@ interface CLIArgs {
   explore: string | null;
   report: boolean;
   reportPort: number;
+  reportDir: string | null;
   numFlows: number;
   noCrawl: boolean;
   outputDir: string;
@@ -161,6 +162,9 @@ function printHelp(): void {
   );
   console.log(
     `    ${c.flag('--report-port')} ${c.arg('<port>')}          ${c.desc('Report server port (default: 4173)')}`
+  );
+  console.log(
+    `    ${c.flag('--report-dir')} ${c.arg('<path>')}           ${c.desc('Serve reports from this dir instead of cwd')}`
   );
   console.log(
     `    ${c.flag('--record')}                       ${c.desc('Record goal execution for replay')}`
@@ -269,6 +273,7 @@ function parseArgs(): CLIArgs {
   let explore: string | null = null;
   let report = false;
   let reportPort = 4173;
+  let reportDir: string | null = null;
   let numFlows = 5;
   let noCrawl = false;
   let outputDir = 'generated-flows';
@@ -292,6 +297,10 @@ function parseArgs(): CLIArgs {
       report = true;
     } else if (args[i] === '--report-port') {
       reportPort = parseInt(args[++i] ?? '4173', 10) || 4173;
+    } else if (args[i] === '--report-dir') {
+      reportDir = args[++i] ?? null;
+    } else if (args[i].startsWith('--report-dir=')) {
+      reportDir = args[i].slice('--report-dir='.length) || null;
     } else if (args[i] === '--env') {
       env = args[++i] ?? null;
     } else if (args[i] === '--env-path' || args[i] === '--env-file') {
@@ -374,6 +383,7 @@ function parseArgs(): CLIArgs {
     explore,
     report,
     reportPort,
+    reportDir,
     numFlows,
     noCrawl,
     outputDir,
@@ -461,7 +471,13 @@ async function main() {
   // ─── Report mode (serve execution reports) ──────────────
   if (cliArgs.report) {
     ui.printHeader(VERSION);
-    const reportProjectRoot = process.cwd();
+    // `--report-dir` overrides the auto-detected project root so you can serve
+    // reports from any location without cd'ing there. Resolved against cwd so
+    // relative paths ("examples/runner", "../foo") work naturally.
+    const { resolve: resolvePath } = await import('node:path');
+    const reportProjectRoot = cliArgs.reportDir
+      ? resolvePath(process.cwd(), cliArgs.reportDir)
+      : process.cwd();
     startReportServer({
       port: cliArgs.reportPort,
       projectRoot: reportProjectRoot,

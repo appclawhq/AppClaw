@@ -45,7 +45,10 @@ export interface FixtureOptions {
  * `[fn | value, { scope }]` tuple to set the scope (Playwright-style).
  */
 export type FixtureDef<T = unknown> =
-  T | FixtureFn<T> | [FixtureFn<T>, FixtureOptions] | [T, FixtureOptions];
+  | T
+  | FixtureFn<T>
+  | [FixtureFn<T>, FixtureOptions]
+  | [T, FixtureOptions];
 export type FixtureDefs = Record<string, FixtureDef>;
 
 /**
@@ -55,7 +58,10 @@ export type FixtureDefs = Record<string, FixtureDef>;
  * `unknown`.
  */
 export type ScopedFixtureDef<T, Deps> =
-  T | FixtureFn<T, Deps> | [FixtureFn<T, Deps>, FixtureOptions] | [T, FixtureOptions];
+  | T
+  | FixtureFn<T, Deps>
+  | [FixtureFn<T, Deps>, FixtureOptions]
+  | [T, FixtureOptions];
 
 /** Scope of the runner-provided built-ins (worker-stable vs per-test). */
 const BUILTIN_SCOPE: Record<string, FixtureScope> = {
