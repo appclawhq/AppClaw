@@ -1,5 +1,5 @@
-import { test as base } from 'appclaw/runner';
-import type { AppClaw } from 'appclaw';
+import { test as base } from '@appclaw/runner';
+import type { AppClaw } from '@appclaw/core';
 import { tapLogin } from './steps.js';
 import { createUser, deleteUser, type ApiUser } from './api.js';
 

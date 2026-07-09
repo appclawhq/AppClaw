@@ -6,12 +6,12 @@
 import React from 'react';
 import { describe, test, expect } from 'vitest';
 import { render } from 'ink-testing-library';
-import { RunScreen, tailSlice } from '../../src/ui/ink/RunScreen.js';
-import type { TimelineEntry } from '../../src/ui/ink/store.js';
-import { store } from '../../src/ui/ink/store.js';
-import { askUserViaInk } from '../../src/ui/ink/InkRenderer.js';
-import { PlaygroundApp } from '../../src/ui/ink/PlaygroundApp.js';
-import { pgStore } from '../../src/ui/ink/playground-store.js';
+import { RunScreen, tailSlice } from '@appclaw/cli/ui/ink/RunScreen';
+import type { TimelineEntry } from '@appclaw/cli/ui/ink/store';
+import { store } from '@appclaw/cli/ui/ink/store';
+import { askUserViaInk } from '@appclaw/cli/ui/ink/InkRenderer';
+import { PlaygroundApp } from '@appclaw/cli/ui/ink/PlaygroundApp';
+import { pgStore } from '@appclaw/cli/ui/ink/playground-store';
 
 const tick = (ms = 30) => new Promise((r) => setTimeout(r, ms));
 

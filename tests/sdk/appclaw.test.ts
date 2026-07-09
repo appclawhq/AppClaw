@@ -2,45 +2,45 @@ import { describe, test, expect, vi, beforeEach } from 'vitest';
 
 // ── Mocks — set up before any module under test is imported ──────────────
 
-vi.mock('../../src/mcp/client.js', () => ({
+vi.mock('@appclaw/core/mcp/client', () => ({
   acquireSharedMCPClient: vi.fn(),
 }));
 
-vi.mock('../../src/flow/parse-yaml-flow.js', () => ({
+vi.mock('@appclaw/core/flow/parse-yaml-flow', () => ({
   parseFlowYamlFile: vi.fn(),
 }));
 
-vi.mock('../../src/flow/run-yaml-flow.js', () => ({
+vi.mock('@appclaw/core/flow/run-yaml-flow', () => ({
   runYamlFlow: vi.fn(),
 }));
 
-vi.mock('../../src/llm/provider.js', () => ({
+vi.mock('@appclaw/core/llm/provider', () => ({
   createLLMProvider: vi.fn(),
 }));
 
-vi.mock('../../src/agent/loop.js', () => ({
+vi.mock('@appclaw/core/agent/loop', () => ({
   runAgent: vi.fn(),
 }));
 
-vi.mock('../../src/ui/terminal.js', () => ({
+vi.mock('@appclaw/core/ui/terminal', () => ({
   silenceTerminalUI: vi.fn(),
   printWarning: vi.fn(),
   printSetupOk: vi.fn(),
   theme: { dim: (s: string) => s, info: (s: string) => s },
 }));
 
-vi.mock('../../src/device/session.js', () => ({
+vi.mock('@appclaw/core/device/session', () => ({
   createPlatformSession: vi.fn(),
 }));
 
-const { acquireSharedMCPClient } = await import('../../src/mcp/client.js');
-const { createPlatformSession } = await import('../../src/device/session.js');
-const { parseFlowYamlFile } = await import('../../src/flow/parse-yaml-flow.js');
-const { runYamlFlow } = await import('../../src/flow/run-yaml-flow.js');
-const { createLLMProvider } = await import('../../src/llm/provider.js');
-const { runAgent } = await import('../../src/agent/loop.js');
-const { silenceTerminalUI } = await import('../../src/ui/terminal.js');
-const { AppClaw } = await import('../../src/sdk/index.js');
+const { acquireSharedMCPClient } = await import('@appclaw/core/mcp/client');
+const { createPlatformSession } = await import('@appclaw/core/device/session');
+const { parseFlowYamlFile } = await import('@appclaw/core/flow/parse-yaml-flow');
+const { runYamlFlow } = await import('@appclaw/core/flow/run-yaml-flow');
+const { createLLMProvider } = await import('@appclaw/core/llm/provider');
+const { runAgent } = await import('@appclaw/core/agent/loop');
+const { silenceTerminalUI } = await import('@appclaw/core/ui/terminal');
+const { AppClaw } = await import('@appclaw/core');
 
 // ── Shared fixture builders ───────────────────────────────────────────────
 

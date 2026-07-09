@@ -22,12 +22,12 @@ import {
   markStale,
   getEffectiveConfidence,
   type LocatorCacheKey,
-} from '../src/sdk/locator-cache.js';
+} from '@appclaw/core/sdk/locator-cache';
 import {
   computeSemanticFingerprint,
   extractScreenLabels,
   extractAppIdFromDom,
-} from '../src/memory/fingerprint.js';
+} from '@appclaw/core/memory/fingerprint';
 
 const tmp = mkdtempSync(join(tmpdir(), 'appclaw-locator-cache-'));
 const path = join(tmp, 'cache.json');

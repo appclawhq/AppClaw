@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, test } from 'appclaw/runner';
+import { afterAll, beforeAll, describe, test } from '@appclaw/runner';
 import { tapLogin } from './steps.js';
 
 // File-scoped: runs once per device, around all tests in this file.

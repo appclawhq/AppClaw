@@ -10,8 +10,8 @@
 
 import fs from 'fs';
 import path from 'path';
-import { renderIndexPage, renderRunPage } from '../src/report/renderer.js';
-import type { RunIndex, RunManifest } from '../src/report/types.js';
+import { renderIndexPage, renderRunPage } from '@appclaw/core/report/renderer';
+import type { RunIndex, RunManifest } from '@appclaw/core/report/types';
 
 const outDir = process.argv[2] ?? 'preview';
 fs.mkdirSync(outDir, { recursive: true });

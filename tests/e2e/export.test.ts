@@ -24,7 +24,7 @@
  * 4. Edit freely. Treat this file as a draft: rename the test, add assertions
  *    (`app.verify(...)`), tighten selectors, split into multiple `it()` blocks.
  */
-import { AppClaw } from '../../src/sdk';
+import { AppClaw } from '@appclaw/core';
 import { describe, it } from 'vitest';
 import 'dotenv/config';
 

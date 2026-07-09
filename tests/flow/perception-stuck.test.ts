@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { computePerceptionHash, computeScreenHash } from '../../src/perception/screen-diff.js';
-import { createStuckDetector, isDataEntryLikeGoal } from '../../src/agent/stuck.js';
+import { computePerceptionHash, computeScreenHash } from '@appclaw/core/perception/screen-diff';
+import { createStuckDetector, isDataEntryLikeGoal } from '@appclaw/core/agent/stuck';
 
 describe('computePerceptionHash', () => {
   it('uses DOM when non-empty', () => {

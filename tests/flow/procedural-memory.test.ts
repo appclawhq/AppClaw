@@ -6,7 +6,7 @@ import {
   retrieveProcedure,
   type ProcedureEntry,
   type ProcedureStore,
-} from '../../src/memory/procedures.js';
+} from '@appclaw/core/memory/procedures';
 
 function procedure(overrides: Partial<ProcedureEntry> = {}): ProcedureEntry {
   const goalKeywords = overrides.goalKeywords ?? ['tap', 'search', 'icon', 'top', 'screen'];

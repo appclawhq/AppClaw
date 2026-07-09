@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { shouldPreferVisionLocateTap } from '../../src/agent/vision-tap-policy.js';
+import { shouldPreferVisionLocateTap } from '@appclaw/core/agent/vision-tap-policy';
 
 describe('shouldPreferVisionLocateTap', () => {
   it('matches digit and backspace selectors from the agent', () => {

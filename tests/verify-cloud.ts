@@ -1,10 +1,10 @@
-import { loadConfig } from '../src/config.js';
+import { loadConfig } from '@appclaw/core/config';
 import {
   isCloud,
   buildCloudHubUrl,
   buildCloudCapabilities,
   cloudProviderLabel,
-} from '../src/device/cloud.js';
+} from '@appclaw/core/device/cloud';
 
 function show(name: string, overrides: Record<string, string>) {
   const cfg = loadConfig(overrides);

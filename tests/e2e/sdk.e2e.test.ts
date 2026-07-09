@@ -25,8 +25,8 @@ import 'dotenv/config';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { AppClaw } from '../../src/sdk/index.js';
-import type { AppClawOptions, FlowResult, AgentResult } from '../../src/sdk/index.js';
+import { AppClaw } from '@appclaw/core';
+import type { AppClawOptions, FlowResult, AgentResult } from '@appclaw/core';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FLOWS = resolve(__dirname, 'flows');

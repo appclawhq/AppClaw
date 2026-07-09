@@ -3,8 +3,8 @@ import {
   rankBySpatial,
   resolveEditableForTarget,
   resolveTapTarget,
-} from '../../src/flow/run-yaml-flow.js';
-import type { UIElement } from '../../src/perception/types.js';
+} from '@appclaw/core/flow/run-yaml-flow';
+import type { UIElement } from '@appclaw/core/perception/types';
 
 function el(
   text: string,

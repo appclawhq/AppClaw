@@ -1,4 +1,4 @@
-import { defineConfig, TestContext } from 'appclaw/runner';
+import { defineConfig, TestContext } from '@appclaw/runner';
 
 // Cloud mode is picked purely by env: set CLOUD_PROVIDER (lambdatest, browserstack,
 // saucelabs, custom) and the corresponding CLOUD_USERNAME / CLOUD_ACCESS_KEY /

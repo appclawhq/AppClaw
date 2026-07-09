@@ -5,8 +5,8 @@
  * Run with: npx tsx tests/sdk-smoke.ts
  */
 
-import { AppClaw } from '../src/sdk/index.js';
-import type { AppClawOptions, FlowResult, AgentResult } from '../src/sdk/index.js';
+import { AppClaw } from '@appclaw/core';
+import type { AppClawOptions, FlowResult, AgentResult } from '@appclaw/core';
 
 // ── 1. Constructor accepts options without touching process.env ──────────────
 

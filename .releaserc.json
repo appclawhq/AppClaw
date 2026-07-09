@@ -6,6 +6,8 @@
       {
         "preset": "conventionalcommits",
         "releaseRules": [
+          { "breaking": true, "release": "major" },
+          { "revert": true, "release": "patch" },
           { "type": "feat", "release": "minor" },
           { "type": "fix", "release": "patch" },
           { "type": "perf", "release": "patch" },
@@ -47,12 +49,11 @@
         "changelogFile": "CHANGELOG.md"
       }
     ],
-    "@semantic-release/npm",
     [
       "@semantic-release/exec",
       {
-        "prepare": "cd packages/appclaw-agent && npm version ${nextRelease.version} --no-git-tag-version --allow-same-version",
-        "publish": "cd packages/appclaw-agent && npm publish"
+        "prepare": "node scripts/release-sync-versions.mjs ${nextRelease.version} && npm install --package-lock-only",
+        "publish": "npm publish --workspaces --access public"
       }
     ],
     [
@@ -62,8 +63,11 @@
           "package.json",
           "package-lock.json",
           "CHANGELOG.md",
-          "packages/appclaw-agent/package.json",
-          "packages/appclaw-agent/package-lock.json"
+          "packages/core/package.json",
+          "packages/cli/package.json",
+          "packages/runner/package.json",
+          "packages/agent/package.json",
+          "examples/runner/package.json"
         ],
         "message": "chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}"
       }

@@ -3,8 +3,8 @@
  * where "click on login button" tapped the header title "Login" instead of the
  * "LOG IN" button. Run: npx tsx tests/verify-tap-scoring.ts
  */
-import { scoreTapMatch, trailingRoleWord } from '../src/flow/run-yaml-flow.js';
-import type { UIElement } from '../src/perception/types.js';
+import { scoreTapMatch, trailingRoleWord } from '@appclaw/core/flow/run-yaml-flow';
+import type { UIElement } from '@appclaw/core/perception/types';
 
 let failures = 0;
 function check(name: string, cond: boolean) {

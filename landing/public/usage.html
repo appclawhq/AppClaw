@@ -1580,7 +1580,7 @@
               <span class="code-block-label">Terminal</span>
             </div>
             <pre><span class="c"># Install</span>
-<span class="k">npm</span> install -g appclaw
+<span class="k">npm</span> install -g @appclaw/cli
 
 <span class="c"># Run with a natural language goal</span>
 <span class="k">appclaw</span> <span class="s">"Open Settings and turn on Wi-Fi"</span>
@@ -1691,7 +1691,7 @@
     <span class="s">"test:login"</span>: <span class="s">"appclaw test tests/login.spec.ts"</span>,
     <span class="s">"test:grep"</span>: <span class="s">"appclaw test --grep login"</span>
   },
-  <span class="s">"devDependencies"</span>: { <span class="s">"appclaw"</span>: <span class="s">"^1.8.0"</span>, <span class="s">"tsx"</span>: <span class="s">"^4.21.0"</span> }
+  <span class="s">"devDependencies"</span>: { <span class="s">"@appclaw/cli"</span>: <span class="s">"^1.9.3"</span>, <span class="s">"@appclaw/core"</span>: <span class="s">"^1.9.3"</span>, <span class="s">"@appclaw/runner"</span>: <span class="s">"^1.9.3"</span>, <span class="s">"tsx"</span>: <span class="s">"^4.21.0"</span> }
 }</pre>
           </div>
 
@@ -3276,7 +3276,7 @@ appclaw --flow flows/checkout.yaml</pre>
               <div class="code-block-dots"><span></span><span></span><span></span></div>
               <span class="code-block-label">TypeScript</span>
             </div>
-            <pre><span class="k">import</span> <span class="p">{</span> AppClaw <span class="p">}</span> <span class="k">from</span> <span class="s">'appclaw'</span><span class="p">;</span>
+            <pre><span class="k">import</span> <span class="p">{</span> AppClaw <span class="p">}</span> <span class="k">from</span> <span class="s">'@appclaw/core'</span><span class="p">;</span>
 
 <span class="c">// CLOUD_PROVIDER is read from .env automatically</span>
 <span class="k">const</span> app <span class="p">=</span> <span class="k">new</span> AppClaw<span class="p">({</span>
@@ -3479,7 +3479,7 @@ appclaw --flow flows/checkout.yaml</pre>
               <div class="code-block-dots"><span></span><span></span><span></span></div>
               <span class="code-block-label">TypeScript</span>
             </div>
-            <pre><span class="k">import</span> <span class="p">{</span> AppClaw <span class="p">}</span> <span class="k">from</span> <span class="s">'appclaw'</span><span class="p">;</span>
+            <pre><span class="k">import</span> <span class="p">{</span> AppClaw <span class="p">}</span> <span class="k">from</span> <span class="s">'@appclaw/core'</span><span class="p">;</span>
 
 <span class="k">const</span> app <span class="p">=</span> <span class="k">new</span> AppClaw<span class="p">({</span>
   provider<span class="p">:</span> <span class="s">'anthropic'</span><span class="p">,</span>
@@ -3552,7 +3552,7 @@ console<span class="p">.</span>log<span class="p">(</span>result<span class="p">
               <div class="code-block-dots"><span></span><span></span><span></span></div>
               <span class="code-block-label">TypeScript</span>
             </div>
-            <pre><span class="k">import</span> <span class="p">{</span> AppClaw <span class="p">}</span> <span class="k">from</span> <span class="s">'appclaw'</span><span class="p">;</span>
+            <pre><span class="k">import</span> <span class="p">{</span> AppClaw <span class="p">}</span> <span class="k">from</span> <span class="s">'@appclaw/core'</span><span class="p">;</span>
 
 <span class="k">const</span> app <span class="p">=</span> <span class="k">new</span> AppClaw<span class="p">({</span> provider<span class="p">:</span> <span class="s">'anthropic'</span><span class="p">,</span> apiKey<span class="p">:</span> process<span class="p">.</span>env<span class="p">.</span>ANTHROPIC_API_KEY <span class="p">});</span>
 
@@ -3590,7 +3590,7 @@ console<span class="p">.</span>log<span class="p">(</span>result<span class="p">
               <div class="code-block-dots"><span></span><span></span><span></span></div>
               <span class="code-block-label">TypeScript</span>
             </div>
-            <pre><span class="k">import</span> <span class="p">{</span> AppClaw <span class="p">}</span> <span class="k">from</span> <span class="s">'appclaw'</span><span class="p">;</span>
+            <pre><span class="k">import</span> <span class="p">{</span> AppClaw <span class="p">}</span> <span class="k">from</span> <span class="s">'@appclaw/core'</span><span class="p">;</span>
 
 <span class="k">const</span> app <span class="p">=</span> <span class="k">new</span> AppClaw<span class="p">({</span> provider<span class="p">:</span> <span class="s">'gemini'</span><span class="p">,</span> apiKey<span class="p">:</span> process<span class="p">.</span>env<span class="p">.</span>GEMINI_API_KEY<span class="p">,</span> platform<span class="p">:</span> <span class="s">'android'</span> <span class="p">});</span>
 
@@ -3724,7 +3724,7 @@ console<span class="p">.</span>log<span class="p">(</span>result<span class="p">
               <div class="code-block-dots"><span></span><span></span><span></span></div>
               <span class="code-block-label">TypeScript</span>
             </div>
-            <pre><span class="k">import</span> <span class="p">{</span> AppClaw <span class="p">}</span> <span class="k">from</span> <span class="s">'appclaw'</span><span class="p">;</span>
+            <pre><span class="k">import</span> <span class="p">{</span> AppClaw <span class="p">}</span> <span class="k">from</span> <span class="s">'@appclaw/core'</span><span class="p">;</span>
 
 <span class="k">const</span> app <span class="p">=</span> <span class="k">new</span> AppClaw<span class="p">();</span>
 
@@ -4117,7 +4117,7 @@ npx appclaw --report --report-port 5000           <span class="c"># custom port<
               <span class="code-block-label">tests/checkout.test.ts</span>
             </div>
             <pre><span class="k">import</span> <span class="p">{</span> describe<span class="p">,</span> it<span class="p">,</span> expect<span class="p">,</span> afterAll <span class="p">}</span> <span class="k">from</span> <span class="s">'vitest'</span><span class="p">;</span>
-<span class="k">import</span> <span class="p">{</span> AppClaw <span class="p">}</span> <span class="k">from</span> <span class="s">'appclaw'</span><span class="p">;</span>
+<span class="k">import</span> <span class="p">{</span> AppClaw <span class="p">}</span> <span class="k">from</span> <span class="s">'@appclaw/core'</span><span class="p">;</span>
 
 <span class="k">const</span> app <span class="p">=</span> <span class="k">new</span> AppClaw<span class="p">({</span>
   provider<span class="p">:</span> <span class="s">'anthropic'</span><span class="p">,</span>
@@ -4180,7 +4180,7 @@ describe<span class="p">(</span><span class="s">'Checkout flow'</span><span clas
               <div class="code-block-dots"><span></span><span></span><span></span></div>
               <span class="code-block-label">scripts/smoke-test.ts</span>
             </div>
-            <pre><span class="k">import</span> <span class="p">{</span> AppClaw <span class="p">}</span> <span class="k">from</span> <span class="s">'appclaw'</span><span class="p">;</span>
+            <pre><span class="k">import</span> <span class="p">{</span> AppClaw <span class="p">}</span> <span class="k">from</span> <span class="s">'@appclaw/core'</span><span class="p">;</span>
 
 <span class="k">const</span> app <span class="p">=</span> <span class="k">new</span> AppClaw<span class="p">({</span>
   provider<span class="p">:</span> <span class="s">'google'</span><span class="p">,</span>
@@ -4402,7 +4402,9 @@ console<span class="p">.</span>log<span class="p">(</span><span class="s">'All f
           </table>
 
           <h3>TypeScript types</h3>
-          <p>All public types are exported from the top-level <code>'appclaw'</code> import:</p>
+          <p>
+            All public types are exported from the top-level <code>'@appclaw/core'</code> import:
+          </p>
 
           <div class="code-block">
             <div class="code-block-header">
@@ -4418,7 +4420,7 @@ console<span class="p">.</span>log<span class="p">(</span><span class="s">'All f
   <span class="k">type</span> RunResult<span class="p">,</span>        <span class="c">// returned by run()</span>
   <span class="k">type</span> AgentResult<span class="p">,</span>      <span class="c">// returned by runGoal()</span>
   <span class="k">type</span> RunYamlFlowOptions <span class="c">// second arg to runFlow()</span>
-<span class="p">}</span> <span class="k">from</span> <span class="s">'appclaw'</span><span class="p">;</span></pre>
+<span class="p">}</span> <span class="k">from</span> <span class="s">'@appclaw/core'</span><span class="p">;</span></pre>
           </div>
 
           <p>
@@ -5256,7 +5258,7 @@ APP_GUIDE (WhatsApp):
               <div class="code-block-dots"><span></span><span></span><span></span></div>
               <span class="code-block-label">Terminal</span>
             </div>
-            <pre><span class="k">npm</span> install -g appclaw-agent</pre>
+            <pre><span class="k">npm</span> install -g @appclaw/agent</pre>
           </div>
 
           <p>
@@ -5644,7 +5646,7 @@ APP_GUIDE (WhatsApp):
           <h2>Writing Tests</h2>
           <p>
             Import <code>test</code>, <code>describe</code>, and hooks from
-            <code>appclaw/runner</code>. Each test gets an injected <code>app</code> and a context
+            <code>@appclaw/runner</code>. Each test gets an injected <code>app</code> and a context
             object.
           </p>
 
@@ -5653,7 +5655,7 @@ APP_GUIDE (WhatsApp):
               <div class="code-block-dots"><span></span><span></span><span></span></div>
               <span class="code-block-label">tests/login.spec.ts</span>
             </div>
-            <pre><span class="k">import</span> { test, describe } <span class="k">from</span> <span class="s">'appclaw/runner'</span>;
+            <pre><span class="k">import</span> { test, describe } <span class="k">from</span> <span class="s">'@appclaw/runner'</span>;
 
 describe(<span class="s">'Login'</span>, () =&gt; {
   test(<span class="s">'user can sign in'</span>, <span class="k">async</span> (app, ctx) =&gt; {
@@ -5742,7 +5744,7 @@ describe(<span class="s">'Login'</span>, () =&gt; {
               <div class="code-block-dots"><span></span><span></span><span></span></div>
               <span class="code-block-label">appclaw.config.ts</span>
             </div>
-            <pre><span class="k">import</span> { defineConfig } <span class="k">from</span> <span class="s">'appclaw/runner'</span>;
+            <pre><span class="k">import</span> { defineConfig } <span class="k">from</span> <span class="s">'@appclaw/runner'</span>;
 
 <span class="k">export default</span> defineConfig({
   <span class="c">// ── discovery / specs ──</span>
@@ -6007,7 +6009,7 @@ tests/               <span class="c">// shared specs — unchanged across platfo
               <div class="code-block-dots"><span></span><span></span><span></span></div>
               <span class="code-block-label">tests/checkout.spec.ts</span>
             </div>
-            <pre><span class="k">import</span> { test, describe, beforeAll, afterAll } <span class="k">from</span> <span class="s">'appclaw/runner'</span>;
+            <pre><span class="k">import</span> { test, describe, beforeAll, afterAll } <span class="k">from</span> <span class="s">'@appclaw/runner'</span>;
 
 beforeAll(<span class="k">async</span> (app) =&gt; { <span class="c">/* once per device, before this file's tests */</span> });
 
@@ -6056,8 +6058,8 @@ deviceSetup → beforeAll (file → describe) → beforeEach → test → afterE
               <div class="code-block-dots"><span></span><span></span><span></span></div>
               <span class="code-block-label">tests/fixtures.ts — define once</span>
             </div>
-            <pre><span class="k">import</span> { test as base } <span class="k">from</span> <span class="s">'appclaw/runner'</span>;
-<span class="k">import type</span> { AppClaw } <span class="k">from</span> <span class="s">'appclaw'</span>;
+            <pre><span class="k">import</span> { test as base } <span class="k">from</span> <span class="s">'@appclaw/runner'</span>;
+<span class="k">import type</span> { AppClaw } <span class="k">from</span> <span class="s">'@appclaw/core'</span>;
 
 <span class="c">// loggedInApp: taps login, hands the app to the test, then tears down.</span>
 <span class="k">export const</span> test = base.extend&lt;{ loggedInApp: AppClaw }&gt;({
@@ -6177,7 +6179,7 @@ test(<span class="s">'list is visible'</span>, <span class="k">async</span> ({ l
                 >tests/fixtures.ts — a fixture that provisions and returns a user</span
               >
             </div>
-            <pre><span class="k">import</span> { test as base } <span class="k">from</span> <span class="s">'appclaw/runner'</span>;
+            <pre><span class="k">import</span> { test as base } <span class="k">from</span> <span class="s">'@appclaw/runner'</span>;
 <span class="k">import</span> { createUser, deleteUser, <span class="k">type</span> ApiUser } <span class="k">from</span> <span class="s">'./api.js'</span>;
 
 <span class="k">export const</span> test = base.extend&lt;{ apiUser: ApiUser }&gt;({

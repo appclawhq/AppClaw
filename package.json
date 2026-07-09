@@ -3,78 +3,25 @@
   "version": "1.9.3",
   "description": "Agentic AI layer for mobile automation via appium-mcp",
   "type": "module",
-  "main": "dist/sdk/index.js",
-  "types": "dist/sdk/index.d.ts",
-  "exports": {
-    ".": {
-      "import": "./dist/sdk/index.js",
-      "types": "./dist/sdk/index.d.ts"
-    },
-    "./cli": {
-      "import": "./dist/index.js"
-    },
-    "./runner": {
-      "import": "./dist/runner/index.js",
-      "types": "./dist/runner/index.d.ts"
-    },
-    "./runner/cli": {
-      "import": "./dist/runner/cli.js",
-      "types": "./dist/runner/cli.d.ts"
-    },
-    "./agent-runtime": {
-      "import": "./dist/agent-runtime/index.js",
-      "types": "./dist/agent-runtime/index.d.ts"
-    }
-  },
-  "bin": {
-    "appclaw": "bin/appclaw.js"
-  },
-  "files": [
-    "dist",
-    "bin"
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "examples/runner"
   ],
   "scripts": {
-    "start": "npx tsx src/index.ts",
-    "dev": "npx tsx --watch src/index.ts",
-    "build": "tsc",
-    "typecheck": "tsc --noEmit",
+    "build": "npm run build -w @appclaw/core && npm run build -w @appclaw/cli && npm run build -w @appclaw/runner && npm run build -w @appclaw/agent",
+    "typecheck": "npm run build -w @appclaw/core && npm run typecheck -w @appclaw/cli && npm run typecheck -w @appclaw/runner && npm run typecheck -w @appclaw/agent",
     "lint": "npm run typecheck",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "preview": "npx tsx scripts/generate-preview.ts preview",
+    "pretest": "npm run build",
     "test": "vitest run tests/flow tests/sdk tests/ui",
     "test:e2e": "vitest run tests/e2e/",
     "test:e2e:android": "MCP_DEBUG=1 vitest run tests/vodqa.test.ts",
     "test:watch": "vitest tests/flow tests/sdk tests/ui",
     "build:vsix": "cd vscode-extension && npm run build && npx vsce package",
     "deploy:landing": "npm run deploy --prefix landing"
-  },
-  "dependencies": {
-    "@ai-sdk/anthropic": "^3.0.0",
-    "@ai-sdk/google": "^3.0.43",
-    "@ai-sdk/openai": "^3.0.0",
-    "@modelcontextprotocol/sdk": "^1.22.0",
-    "ai": "^6.0.72",
-    "ai-sdk-ollama": "3.8.3",
-    "appium-mcp": "^1.87.0",
-    "boxen": "^8.0.1",
-    "chalk": "^5.6.2",
-    "cli-spinners": "^3.4.0",
-    "cli-table3": "^0.6.5",
-    "df-vision": "1.1.79",
-    "dotenv": "^17.3.1",
-    "fast-xml-parser": "^4.5.0",
-    "gradient-string": "^3.0.0",
-    "ink": "^5.2.1",
-    "ink-spinner": "^5.0.0",
-    "ink-text-input": "^6.0.0",
-    "marked": "^15.0.12",
-    "marked-terminal": "^7.3.0",
-    "mjpeg-consumer": "2.0.0",
-    "react": "^18.3.1",
-    "sharp": "^0.33.5",
-    "yaml": "^2.8.3",
-    "zod": "^3.23.0"
   },
   "devDependencies": {
     "@semantic-release/changelog": "^6.0.3",

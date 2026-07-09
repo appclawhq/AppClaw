@@ -19,8 +19,8 @@
  */
 import 'dotenv/config';
 import { describe, it } from 'vitest';
-import type { RunOptions } from '../src/sdk';
-import { AppClaw } from '../src/sdk';
+import type { RunOptions } from '@appclaw/core';
+import { AppClaw } from '@appclaw/core';
 describe('Recorded flow', () => {
   it('launches vodqa and swipe the first slider to the right', async () => {
     const app = new AppClaw({

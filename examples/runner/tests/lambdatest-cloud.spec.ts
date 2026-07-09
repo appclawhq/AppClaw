@@ -28,7 +28,7 @@
  * pinned by `CLOUD_DEVICE_NAME` + `CLOUD_OS_VERSION`.
  */
 
-import { afterAll, beforeAll, describe } from 'appclaw/runner';
+import { afterAll, beforeAll, describe } from '@appclaw/runner';
 import { test } from './fixtures.js';
 import { tapLogin } from './steps.js';
 

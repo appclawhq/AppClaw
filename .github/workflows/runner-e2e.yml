@@ -1,7 +1,7 @@
 name: Runner E2E (2 Android emulators)
 
 # End-to-end test of the parallel runner (examples/runner): boots TWO Android
-# emulators and runs the example specs across both with `appclaw test --workers 2`.
+# emulators and runs the example specs across both with `appclaw-runner --workers 2`.
 #
 # This is heavy (2 emulators + LLM calls), so it does NOT run on every PR. It
 # runs on demand (Actions tab) and when the runner itself changes.
@@ -55,18 +55,12 @@ jobs:
           node-version: '22'
           cache: npm
 
-      # ── Build the local AppClaw and expose it as a global `appclaw` ──────────
-      - name: Build & link AppClaw
+      # ── Build the workspace (npm ci also installs & links examples/runner,
+      #    a workspace member, and exposes the `appclaw-runner` bin) ────────────
+      - name: Build AppClaw
         run: |
           npm ci
           npm run build
-          npm link
-
-      - name: Install example deps & link AppClaw
-        working-directory: examples/runner
-        run: |
-          npm install
-          npm link appclaw
 
       # ── Android emulator acceleration ───────────────────────────────────────
       - name: Enable KVM
@@ -88,7 +82,7 @@ jobs:
       # ── Run the runner across two emulators ─────────────────────────────────
       # reactivecircus/android-emulator-runner boots one AVD ("test", emulator-5554)
       # and runs `script`. Inside the script we boot a SECOND emulator on port 5556,
-      # wait for both to finish booting, then run `appclaw test --workers 2` so the
+      # wait for both to finish booting, then run `appclaw-runner --workers 2` so the
       # specs fan out across both devices.
       - name: Boot 2 emulators & run specs
         uses: reactivecircus/android-emulator-runner@v2
@@ -113,7 +107,7 @@ jobs:
             adb devices
             # Run the example specs across both emulators. Each line runs in its
             # own `sh -c`, so `cd` must be chained with the command that needs it.
-            cd examples/runner && appclaw test --workers 2 --retries 1 --reporter plain
+            cd examples/runner && npx appclaw-runner --workers 2 --retries 1 --reporter plain
 
       - name: Upload runner report
         if: always()

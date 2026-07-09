@@ -3,8 +3,8 @@
  * Tests the parser + variable resolver without needing a device.
  */
 
-import { parseFlowYamlFile } from '../src/flow/parse-yaml-flow.js';
-import { loadEnvironmentFile } from '../src/flow/variable-resolver.js';
+import { parseFlowYamlFile } from '@appclaw/core/flow/parse-yaml-flow';
+import { loadEnvironmentFile } from '@appclaw/core/flow/variable-resolver';
 import { resolve } from 'path';
 
 async function main() {

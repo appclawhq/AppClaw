@@ -1,0 +1,153 @@
+/**
+ * Device setup pipeline — orchestrates platform selection, device discovery,
+ * iOS setup (simulator boot + WDA), and session creation.
+ *
+ * Single entry point for all modes (agent, flow, explorer, replay).
+ */
+
+export { resolvePlatform } from './platform-picker.js';
+export { discoverAndSelectDevice } from './device-picker.js';
+export type { DeviceInfo, DeviceSelection } from './device-picker.js';
+export { setupSimulator, checkRealDeviceWDA } from './ios-setup.js';
+export { createPlatformSession } from './session.js';
+export type { SessionResult } from './session.js';
+
+import type { MCPClient } from '../mcp/types.js';
+import type { AppClawConfig } from '../config.js';
+import type { Platform, DeviceType } from '../sdk/types.js';
+import { resolvePlatform } from './platform-picker.js';
+import { discoverAndSelectDevice } from './device-picker.js';
+import { setupSimulator, checkRealDeviceWDA } from './ios-setup.js';
+import { createPlatformSession } from './session.js';
+import type { SessionResult } from './session.js';
+import { isCloud, cloudProviderLabel } from './cloud.js';
+
+export interface DeviceSetupArgs {
+  cliPlatform: Platform | null;
+  cliDeviceType: DeviceType | null;
+  cliUdid: string | null;
+  cliDeviceName: string | null;
+  config: AppClawConfig;
+  /**
+   * Always show the device picker even when a single device is available or the platform
+   * is pre-selected. Used by playground mode so the user always gets to choose a device.
+   */
+  alwaysPickDevice?: boolean;
+  /**
+   * Extra Appium capabilities merged into the session for this specific device.
+   * Used by parallel runners to assign unique ports per worker:
+   * - Android: `appium:systemPort`, `appium:mjpegServerPort`, `appium:mjpegScreenshotUrl`
+   * - iOS: `appium:wdaLocalPort`
+   */
+  extraCaps?: Record<string, unknown>;
+}
+
+export interface DeviceSetupResult {
+  platform: Platform;
+  deviceType?: DeviceType;
+  deviceName: string;
+  deviceUdid: string;
+  session: SessionResult;
+  /** Appium session ID returned by create_session. */
+  sessionId: string;
+  /**
+   * Session-scoped MCP wrapper. Use this for all post-setup tool calls
+   * (flows, agent loop, app resolver) so every call targets the right device.
+   * Especially important in parallel runs where multiple sessions share one process.
+   */
+  scopedMcp: MCPClient;
+}
+
+/**
+ * Full device setup pipeline:
+ * 1. Resolve platform (CLI / env / prompt)
+ * 2. Connect to MCP & discover devices
+ * 3. iOS: boot simulator + WDA setup, or real device check
+ * 4. Create Appium session
+ */
+export async function setupDevice(
+  mcp: MCPClient,
+  args: DeviceSetupArgs
+): Promise<DeviceSetupResult> {
+  // Step 1: Resolve platform + device type
+  const { platform, deviceType } = await resolvePlatform({
+    cliPlatform: args.cliPlatform,
+    cliDeviceType: args.cliDeviceType,
+    config: args.config,
+  });
+
+  // Cloud mode: skip local device discovery and iOS setup entirely
+  if (isCloud(args.config)) {
+    const session = await createPlatformSession(mcp, args.config, platform, deviceType);
+    return {
+      platform,
+      deviceType,
+      deviceName: args.config.CLOUD_DEVICE_NAME || `${cloudProviderLabel(args.config)} Cloud`,
+      deviceUdid: 'cloud',
+      session,
+      sessionId: session.sessionId,
+      scopedMcp: session.scopedMcp,
+    };
+  }
+
+  // Step 2: Discover and select a device
+  // Use CLI args first, then fall back to config env vars
+  const udid = args.cliUdid || args.config.DEVICE_UDID || null;
+  const deviceName = args.cliDeviceName || args.config.DEVICE_NAME || null;
+
+  // If platform was chosen interactively (not via CLI/env), always show the device picker
+  // so the user can choose which device they want. Only auto-select when explicitly set.
+  const explicitDevice = !!(udid || deviceName);
+  const explicitPlatform = !!(args.cliPlatform || args.config.PLATFORM);
+  // Force picker when: no device/platform specified interactively, OR caller explicitly requests it
+  const forceDevicePicker =
+    (!explicitDevice && !explicitPlatform) || (!!args.alwaysPickDevice && !explicitDevice);
+
+  const selection = await discoverAndSelectDevice(
+    mcp,
+    platform,
+    deviceType,
+    udid,
+    deviceName,
+    forceDevicePicker
+  );
+
+  // Step 3: iOS-specific setup
+  let simulatorHint: Record<string, unknown> = {};
+  if (platform === 'ios' && deviceType === 'simulator') {
+    const setup = await setupSimulator(mcp, selection.device.udid);
+    simulatorHint = setup.capabilitiesHint;
+  } else if (platform === 'ios' && deviceType === 'real') {
+    await checkRealDeviceWDA();
+  }
+
+  // Step 4: Create session
+  // Merge the WDA capabilities hint from prepare_ios_simulator into extraCaps.
+  // Precedence: hint < caller extraCaps (caller can still override).
+  // When the hint provides `appium:webDriverAgentUrl`, drop any conflicting
+  // `appium:wdaLocalPort` — the two are mutually exclusive per XCUITestDriver's
+  // contract (webDriverAgentUrl reuses a running WDA; wdaLocalPort tells it to
+  // launch a new one). Passing both makes XCUITest ignore the running WDA and
+  // fail on xcodebuild.
+  const mergedExtraCaps: Record<string, unknown> = { ...simulatorHint, ...args.extraCaps };
+  if (mergedExtraCaps['appium:webDriverAgentUrl']) {
+    delete mergedExtraCaps['appium:wdaLocalPort'];
+  }
+  const session = await createPlatformSession(
+    mcp,
+    args.config,
+    platform,
+    deviceType,
+    mergedExtraCaps
+  );
+
+  return {
+    platform,
+    deviceType,
+    deviceName: selection.device.name,
+    deviceUdid: selection.device.udid,
+    session,
+    sessionId: session.sessionId,
+    scopedMcp: session.scopedMcp,
+  };
+}

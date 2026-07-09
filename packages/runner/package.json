@@ -1,0 +1,38 @@
+{
+  "name": "@appclaw/runner",
+  "version": "1.9.3",
+  "description": "AppClaw vitest-style test runner for mobile automation flows",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "appclaw-runner": "bin/appclaw-runner.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./cli": {
+      "types": "./dist/cli.d.ts",
+      "import": "./dist/cli.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "bin"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@appclaw/core": "1.9.3",
+    "ink": "^5.2.1",
+    "react": "^18.3.1"
+  }
+}

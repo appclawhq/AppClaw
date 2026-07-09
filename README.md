@@ -45,8 +45,31 @@ AppClaw:
 ### From npm
 
 ```bash
-npm install -g appclaw
+npm install -g @appclaw/cli
 ```
+
+> **Package rename (scoped `@appclaw`).** The former single-package layout has
+> been split into scoped workspace packages. If you were on the old unscoped
+> names, migrate as follows:
+>
+> | Old (unscoped)  | New (scoped)      | What it is                      |
+> | --------------- | ----------------- | ------------------------------- |
+> | `appclaw`       | `@appclaw/core`   | Headless engine + public SDK    |
+> | `appclaw-agent` | `@appclaw/agent`  | `appclaw-agent` device CLI      |
+> | —               | `@appclaw/cli`    | `appclaw` interactive CLI (new) |
+> | —               | `@appclaw/runner` | Vitest-style test runner (new)  |
+>
+> Update your imports from `appclaw` to `@appclaw/core`, and install the CLI as
+> `@appclaw/cli` / the agent as `@appclaw/agent`.
+>
+> **Maintainers only** — after the first scoped publish, run these once to point
+> the retired unscoped packages at their replacements (they require npm publish
+> rights and are **not** run by CI):
+>
+> ```bash
+> npm deprecate appclaw "moved to @appclaw/core"
+> npm deprecate appclaw-agent "moved to @appclaw/agent"
+> ```
 
 Create a `.env` file in your working directory:
 
@@ -322,7 +345,7 @@ Bare filenames for SDK tests land in `EXPORT_DIR` (default `.appclaw/exports`); 
 Drive a device programmatically from a vitest / jest / mocha test. The SDK exposes the same natural-language layer as the playground, so steps you build interactively can be lifted into a test file as-is.
 
 ```ts
-import { AppClaw, AppClawAssertionError } from 'appclaw';
+import { AppClaw, AppClawAssertionError } from '@appclaw/core';
 import { describe, it } from 'vitest';
 import 'dotenv/config';
 
@@ -421,8 +444,14 @@ await app.run('swipe up', { scrollMode: 'full' });
 **TypeScript types** — the package ships full type declarations (`package.json` → `types: dist/sdk/index.d.ts`), so editors give autocomplete on every option and `tsc` rejects typos before a test runs. The public types are importable by name:
 
 ```ts
-import { AppClaw, AppClawStepError, AppClawAssertionError } from 'appclaw';
-import type { AppClawOptions, RunOptions, ScrollDistance, RunResult, FlowResult } from 'appclaw';
+import { AppClaw, AppClawStepError, AppClawAssertionError } from '@appclaw/core';
+import type {
+  AppClawOptions,
+  RunOptions,
+  ScrollDistance,
+  RunResult,
+  FlowResult,
+} from '@appclaw/core';
 ```
 
 Definitions:
@@ -479,7 +508,7 @@ await app.run('swipe up', { scrollMode: 'shrt' }); // ✗ TS error: not assignab
 await app.run('swipe up', { waitTimout: 1000 }); // ✗ TS error: unknown property (did you mean waitTimeout?)
 ```
 
-> Inside this repo, import from the relative source path (`../src/sdk`) instead of `'appclaw'`.
+> Inside this repo, import from the package name (`@appclaw/core`) or the relative source path (`packages/core/src/sdk`) instead of the published `'@appclaw/core'` specifier.
 
 ### Explorer (PRD-driven test generation)
 
@@ -649,7 +678,7 @@ For Claude Code, Gemini CLI, Codex CLI, and other agents that can run terminal
 commands, install the separate agent-native CLI:
 
 ```sh
-npm install -g appclaw-agent
+npm install -g @appclaw/agent
 appclaw-agent help workflow
 ```
 

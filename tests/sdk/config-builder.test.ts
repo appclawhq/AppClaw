@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from 'vitest';
-import { buildConfig } from '../../src/sdk/config-builder.js';
+import { buildConfig } from '@appclaw/core/sdk/config-builder';
 
 // Snapshot of env vars we touch — restored after each test.
 const TOUCHED_VARS = [

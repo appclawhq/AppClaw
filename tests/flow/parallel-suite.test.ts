@@ -13,7 +13,7 @@ import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
 // Mock LLM parser so tests don't need an API key
-vi.mock('../../src/flow/llm-parser.js', () => ({
+vi.mock('@appclaw/core/flow/llm-parser', () => ({
   resolveNaturalStep: async (instruction: string) => ({
     kind: 'tap',
     label: instruction,
@@ -22,7 +22,7 @@ vi.mock('../../src/flow/llm-parser.js', () => ({
 }));
 
 const { parseFlowYamlString, isSuiteYaml, parseSuiteYamlFile } =
-  await import('../../src/flow/parse-yaml-flow.js');
+  await import('@appclaw/core/flow/parse-yaml-flow');
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FIXTURES = resolve(__dirname, '../flows/fixtures');

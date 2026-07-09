@@ -1,0 +1,43 @@
+{
+  "name": "@appclaw/agent",
+  "version": "1.9.3",
+  "description": "Agent-native terminal CLI for AppClaw mobile automation",
+  "type": "module",
+  "bin": {
+    "appclaw-agent": "bin/appclaw-agent.js"
+  },
+  "main": "dist/cli.js",
+  "types": "dist/cli.d.ts",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "bin",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@appclaw/core": "1.9.3"
+  },
+  "devDependencies": {
+    "@semantic-release/changelog": "^6.0.3",
+    "@semantic-release/commit-analyzer": "^13.0.1",
+    "@semantic-release/git": "^10.0.1",
+    "@semantic-release/github": "^11.0.6",
+    "@semantic-release/npm": "^12.0.2",
+    "@semantic-release/release-notes-generator": "^14.1.0",
+    "@types/node": "^22.0.0",
+    "conventional-changelog-conventionalcommits": "^9.3.1",
+    "semantic-release": "^24.2.9",
+    "typescript": "^5.6.0",
+    "vitest": "^4.1.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

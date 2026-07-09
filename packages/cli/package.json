@@ -1,0 +1,35 @@
+{
+  "name": "@appclaw/cli",
+  "version": "1.9.3",
+  "description": "AppClaw interactive CLI (Ink) for mobile automation",
+  "type": "module",
+  "bin": {
+    "appclaw": "bin/appclaw.js"
+  },
+  "exports": {
+    "./package.json": "./package.json",
+    "./*": {
+      "types": "./dist/*.d.ts",
+      "import": "./dist/*.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "bin"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@appclaw/core": "1.9.3",
+    "@appclaw/runner": "1.9.3",
+    "ink": "^5.2.1",
+    "ink-spinner": "^5.0.0",
+    "ink-text-input": "^6.0.0",
+    "react": "^18.3.1"
+  }
+}

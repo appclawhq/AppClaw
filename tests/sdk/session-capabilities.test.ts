@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { normalizeCapabilitiesForPlatform } from '../../src/device/session.js';
+import { normalizeCapabilitiesForPlatform } from '@appclaw/core/device/session';
 
 describe('normalizeCapabilitiesForPlatform', () => {
   test('keeps flat capability files unchanged', () => {

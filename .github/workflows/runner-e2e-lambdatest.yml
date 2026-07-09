@@ -65,18 +65,12 @@ jobs:
           node-version: '22'
           cache: npm
 
-      # ── Build the local AppClaw and expose it as a global `appclaw` ──────
-      - name: Build & link AppClaw
+      # ── Build the workspace (npm ci also installs & links examples/runner,
+      #    a workspace member, and exposes the `appclaw-runner` bin) ─────────
+      - name: Build AppClaw
         run: |
           npm ci
           npm run build
-          npm link
-
-      - name: Install example deps & link AppClaw
-        working-directory: examples/runner
-        run: |
-          npm install
-          npm link appclaw
 
       # ── Sanity-check the cloud creds are wired ───────────────────────────
       - name: Verify cloud secrets
@@ -94,7 +88,7 @@ jobs:
       # help absorb hub-side flakiness (queue waits, session startup timeouts).
       - name: Run LambdaTest cloud spec
         working-directory: examples/runner
-        run: appclaw test tests/lambdatest-cloud.spec.ts --workers 1 --retries 1 --reporter plain
+        run: npx appclaw-runner tests/lambdatest-cloud.spec.ts --workers 1 --retries 1 --reporter plain
 
       - name: Upload runner report
         if: always()

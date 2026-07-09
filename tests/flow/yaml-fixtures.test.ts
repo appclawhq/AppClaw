@@ -2,12 +2,12 @@ import { describe, test, expect, vi } from 'vitest';
 import { readFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import type { VariableBindings } from '../../src/flow/variable-resolver.js';
+import type { VariableBindings } from '@appclaw/core/flow/variable-resolver';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // Mock the LLM parser so tests don't require an API key
-vi.mock('../../src/flow/llm-parser.js', () => ({
+vi.mock('@appclaw/core/flow/llm-parser', () => ({
   resolveNaturalStep: async (instruction: string) => ({
     kind: 'tap',
     label: instruction,
@@ -15,7 +15,7 @@ vi.mock('../../src/flow/llm-parser.js', () => ({
   }),
 }));
 
-const { parseFlowYamlString } = await import('../../src/flow/parse-yaml-flow.js');
+const { parseFlowYamlString } = await import('@appclaw/core/flow/parse-yaml-flow');
 
 const FIXTURES = resolve(__dirname, '../flows/fixtures');
 

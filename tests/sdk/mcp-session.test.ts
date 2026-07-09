@@ -1,5 +1,5 @@
 import { describe, test, expect, vi, beforeEach } from 'vitest';
-import type { MCPClient, MCPToolInfo, SharedMCPClient } from '../../src/mcp/types.js';
+import type { MCPClient, MCPToolInfo, SharedMCPClient } from '@appclaw/core/mcp/types';
 
 // ── Mock acquireSharedMCPClient ───────────────────────────────────────────
 
@@ -20,17 +20,17 @@ function makeSharedClient(): SharedMCPClient {
   };
 }
 
-vi.mock('../../src/mcp/client.js', () => ({
+vi.mock('@appclaw/core/mcp/client', () => ({
   acquireSharedMCPClient: vi.fn(),
 }));
 
-vi.mock('../../src/device/session.js', () => ({
+vi.mock('@appclaw/core/device/session', () => ({
   createPlatformSession: vi.fn(),
 }));
 
-const { acquireSharedMCPClient } = await import('../../src/mcp/client.js');
-const { createPlatformSession } = await import('../../src/device/session.js');
-const { McpSession, isLocalNode } = await import('../../src/sdk/mcp-session.js');
+const { acquireSharedMCPClient } = await import('@appclaw/core/mcp/client');
+const { createPlatformSession } = await import('@appclaw/core/device/session');
+const { McpSession, isLocalNode } = await import('@appclaw/core/sdk/mcp-session');
 
 /** Extra caps passed to createPlatformSession on the most recent connect(). */
 function lastExtraCaps(): Record<string, unknown> {

@@ -13,7 +13,7 @@ import {
   mergeBindings,
   emptyBindings,
   type VariableBindings,
-} from '../../src/flow/variable-resolver.js';
+} from '@appclaw/core/flow/variable-resolver';
 
 // ── interpolate ─────────────────────────────────────────────────────
 

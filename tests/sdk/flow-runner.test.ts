@@ -1,20 +1,20 @@
 import { describe, test, expect, vi, beforeEach } from 'vitest';
-import type { MCPClient } from '../../src/mcp/types.js';
-import type { ParsedFlow } from '../../src/flow/types.js';
+import type { MCPClient } from '@appclaw/core/mcp/types';
+import type { ParsedFlow } from '@appclaw/core/flow/types';
 
 // ── Mocks ─────────────────────────────────────────────────────────────────
 
-vi.mock('../../src/flow/parse-yaml-flow.js', () => ({
+vi.mock('@appclaw/core/flow/parse-yaml-flow', () => ({
   parseFlowYamlFile: vi.fn(),
 }));
 
-vi.mock('../../src/flow/run-yaml-flow.js', () => ({
+vi.mock('@appclaw/core/flow/run-yaml-flow', () => ({
   runYamlFlow: vi.fn(),
 }));
 
-const { parseFlowYamlFile } = await import('../../src/flow/parse-yaml-flow.js');
-const { runYamlFlow } = await import('../../src/flow/run-yaml-flow.js');
-const { FlowRunner } = await import('../../src/sdk/flow-runner.js');
+const { parseFlowYamlFile } = await import('@appclaw/core/flow/parse-yaml-flow');
+const { runYamlFlow } = await import('@appclaw/core/flow/run-yaml-flow');
+const { FlowRunner } = await import('@appclaw/core/sdk/flow-runner');
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 

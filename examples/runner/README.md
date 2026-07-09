@@ -18,18 +18,20 @@ tests/
 
 ## Setup (running inside this repo)
 
-This example imports the local `appclaw` package by its name (`appclaw/runner`),
+This example imports the local packages by name (`@appclaw/runner`,
+`@appclaw/core`) and drives them with the `appclaw` binary from `@appclaw/cli`,
 so link the repo into it once:
 
 ```bash
-# from the repo root — exposes the local build as a global `appclaw`
+# from the repo root — build the workspace and expose the CLI binary globally
 npm run build && npm link
 
-# from this folder — symlink the linked package into node_modules
-cd examples/runner && npm link appclaw
+# from this folder — symlink the linked packages into node_modules
+cd examples/runner && npm link @appclaw/cli @appclaw/core @appclaw/runner
 ```
 
-A real consumer project skips this and just runs `npm install -D appclaw tsx`.
+A real consumer project skips this and just runs
+`npm install -D @appclaw/cli @appclaw/core @appclaw/runner tsx`.
 
 ## Run
 
@@ -47,7 +49,12 @@ Trigger it from `package.json` scripts — that's the normal entry point:
     "test:login": "appclaw test tests/login.spec.ts",
     "test:grep": "appclaw test --grep login",
   },
-  "devDependencies": { "appclaw": "^1.8.0", "tsx": "^4.21.0" },
+  "devDependencies": {
+    "@appclaw/cli": "^1.9.3",
+    "@appclaw/core": "^1.9.3",
+    "@appclaw/runner": "^1.9.3",
+    "tsx": "^4.21.0",
+  },
 }
 ```
 

@@ -203,18 +203,23 @@ runs:
       if: inputs.use-local-build == 'false'
       shell: bash
       run: |
-        echo "::group::Installing appclaw@${{ inputs.appclaw-version }}"
-        npm install -g appclaw@${{ inputs.appclaw-version }} mjpeg-consumer
+        echo "::group::Installing @appclaw/cli@${{ inputs.appclaw-version }}"
+        npm install -g @appclaw/cli@${{ inputs.appclaw-version }} mjpeg-consumer
         echo "::endgroup::"
 
     - name: Install AppClaw (from local source)
       if: inputs.use-local-build == 'true'
       shell: bash
       run: |
-        echo "::group::Building and installing AppClaw from local source"
+        echo "::group::Building AppClaw from local source"
         npm install --no-package-lock
         npm run build
-        npm install -g . mjpeg-consumer
+        # The root is a private workspace with no bin; the `appclaw` command
+        # lives in @appclaw/cli and resolves its @appclaw/* deps from the local
+        # workspace (they aren't published). A global `npm install -g .` would
+        # expose no bin, so put the workspace bin dir on PATH instead.
+        npm install -g mjpeg-consumer
+        echo "$GITHUB_WORKSPACE/node_modules/.bin" >> "$GITHUB_PATH"
         echo "::endgroup::"
 
     # ── LambdaTest — YAML flow ────────────────────────────────────────────────

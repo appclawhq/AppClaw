@@ -1,20 +1,20 @@
 import { describe, test, expect, vi, beforeEach } from 'vitest';
-import type { MCPClient, MCPToolInfo } from '../../src/mcp/types.js';
-import type { AgentResult } from '../../src/agent/loop.js';
+import type { MCPClient, MCPToolInfo } from '@appclaw/core/mcp/types';
+import type { AgentResult } from '@appclaw/core/agent/loop';
 
 // ── Mocks ─────────────────────────────────────────────────────────────────
 
-vi.mock('../../src/llm/provider.js', () => ({
+vi.mock('@appclaw/core/llm/provider', () => ({
   createLLMProvider: vi.fn(),
 }));
 
-vi.mock('../../src/agent/loop.js', () => ({
+vi.mock('@appclaw/core/agent/loop', () => ({
   runAgent: vi.fn(),
 }));
 
-const { createLLMProvider } = await import('../../src/llm/provider.js');
-const { runAgent } = await import('../../src/agent/loop.js');
-const { GoalRunner } = await import('../../src/sdk/goal-runner.js');
+const { createLLMProvider } = await import('@appclaw/core/llm/provider');
+const { runAgent } = await import('@appclaw/core/agent/loop');
+const { GoalRunner } = await import('@appclaw/core/sdk/goal-runner');
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 

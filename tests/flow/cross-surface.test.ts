@@ -15,7 +15,7 @@ import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '../..');
-const JSON_EMITTER = readFileSync(resolve(ROOT, 'src/json-emitter.ts'), 'utf-8');
+const JSON_EMITTER = readFileSync(resolve(ROOT, 'packages/core/src/json-emitter.ts'), 'utf-8');
 const BRIDGE = readFileSync(resolve(ROOT, 'vscode-extension/src/bridge.ts'), 'utf-8');
 
 /**

@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'vitest';
-import { tryParseNaturalFlowLine } from '../../src/flow/natural-line.js';
-import type { FlowStep } from '../../src/flow/types.js';
+import { tryParseNaturalFlowLine } from '@appclaw/core/flow/natural-line';
+import type { FlowStep } from '@appclaw/core/flow/types';
 
 // Helper to assert step kind and key fields
 function expectStep(input: string, expected: Partial<FlowStep> & { kind: string }) {

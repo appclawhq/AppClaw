@@ -1,4 +1,4 @@
-import { AppClaw } from '../../src/sdk';
+import { AppClaw } from '@appclaw/core';
 import { describe, it } from 'vitest';
 import 'dotenv/config';
 

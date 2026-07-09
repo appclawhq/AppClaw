@@ -1,0 +1,55 @@
+{
+  "name": "@appclaw/core",
+  "version": "1.9.3",
+  "description": "AppClaw headless engine and public SDK for mobile automation",
+  "type": "module",
+  "main": "dist/sdk/index.js",
+  "types": "dist/sdk/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/sdk/index.d.ts",
+      "import": "./dist/sdk/index.js"
+    },
+    "./agent-runtime": {
+      "types": "./dist/agent-runtime/index.d.ts",
+      "import": "./dist/agent-runtime/index.js"
+    },
+    "./package.json": "./package.json",
+    "./*": {
+      "types": "./dist/*.d.ts",
+      "import": "./dist/*.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.0",
+    "@ai-sdk/google": "^3.0.43",
+    "@ai-sdk/openai": "^3.0.0",
+    "@modelcontextprotocol/sdk": "^1.22.0",
+    "ai": "^6.0.72",
+    "ai-sdk-ollama": "3.8.3",
+    "appium-mcp": "^1.87.0",
+    "boxen": "^8.0.1",
+    "chalk": "^5.6.2",
+    "cli-spinners": "^3.4.0",
+    "cli-table3": "^0.6.5",
+    "@appclaw/vision": "^2.0.0",
+    "dotenv": "^17.3.1",
+    "fast-xml-parser": "^4.5.0",
+    "gradient-string": "^3.0.0",
+    "marked": "^15.0.12",
+    "marked-terminal": "^7.3.0",
+    "sharp": "^0.33.5",
+    "yaml": "^2.8.3",
+    "zod": "^3.23.0"
+  }
+}

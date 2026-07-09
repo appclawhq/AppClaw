@@ -3,7 +3,7 @@
  * must keep the target (so DOM mode can anchor the gesture) while plain
  * directional swipes stay target-less. Run: npx tsx tests/verify-swipe-parsing.ts
  */
-import { tryParseNaturalFlowLine } from '../src/flow/natural-line.js';
+import { tryParseNaturalFlowLine } from '@appclaw/core/flow/natural-line';
 
 let failures = 0;
 function check(name: string, cond: boolean) {
