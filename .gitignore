@@ -9,3 +9,4 @@ logs/
 .appclaw/
 # Generated HTML report preview (npm run preview) — ephemeral CI smoke output
 preview/
+.npmrc

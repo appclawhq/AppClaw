@@ -52,8 +52,8 @@
     [
       "@semantic-release/exec",
       {
-        "prepare": "node scripts/release-sync-versions.mjs ${nextRelease.version} && npm install --package-lock-only",
-        "publish": "npm publish --workspaces --access public"
+        "prepareCmd": "node scripts/release-sync-versions.mjs ${nextRelease.version} && npm install --package-lock-only",
+        "publishCmd": "npm publish --workspaces --access public"
       }
     ],
     [
