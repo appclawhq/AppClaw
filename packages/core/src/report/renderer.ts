@@ -362,9 +362,11 @@ function renderAnalytics(runs: RunIndexEntry[]): string {
     .map((f) => {
       const pct = Math.max(6, Math.round((f.failures / f.total) * 100));
       return `<div class="failing-row">
-        <div class="failing-name">${esc(f.name)}</div>
-        <div class="failing-bar-wrap"><div class="failing-bar" style="width:${pct}%"></div></div>
-        <span class="failing-count">${f.failures}/${f.total}</span>
+        <div class="failing-name" title="${esc(f.name)}">${esc(f.name)}</div>
+        <div class="failing-meta">
+          <div class="failing-bar-wrap"><div class="failing-bar" style="width:${pct}%"></div></div>
+          <span class="failing-count">${f.failures}/${f.total}</span>
+        </div>
       </div>`;
     })
     .join('');
@@ -541,6 +543,12 @@ function renderResults(runs: RunIndexEntry[], suites: SuiteEntry[]): string {
       }
     </div>
     <div id="empty" class="empty" hidden>No tests match.</div>
+    <div id="pager" class="pager" hidden>
+      <button id="pager-prev" class="pager-btn" type="button" onclick="goPage(-1)">‹ Prev</button>
+      <span id="pager-page" class="pager-page"></span>
+      <span id="pager-info" class="pager-info"></span>
+      <button id="pager-next" class="pager-btn" type="button" onclick="goPage(1)">Next ›</button>
+    </div>
   </section>`;
 }
 
@@ -554,27 +562,50 @@ function renderFooter(index: RunIndex): string {
 /** Filter + auto-refresh script for the history page. */
 function historyScript(): string {
   return `
-// ── filter + search ──
-var state={q:'',status:'all',plat:'all'};
+// ── filter + search + pagination (10 per page) ──
+var PAGE_SIZE=10;
+var state={q:'',status:'all',plat:'all',page:1};
 function apply(){
-  var visible=0;
+  // 1) Determine which rows match the active filters; hide non-matches outright.
+  var matches=[];
   document.querySelectorAll('.test').forEach(function(t){
     var s=t.dataset.status||'', p=t.dataset.platform||'', title=t.dataset.title||'';
     var okS=state.status==='all'||s===state.status;
     var okP=state.plat==='all'||p===state.plat;
     var okQ=!state.q||title.indexOf(state.q)>-1;
-    var show=okS&&okP&&okQ;
-    t.style.display=show?'':'none'; if(show)visible++;
+    if(okS&&okP&&okQ){matches.push(t);} else {t.style.display='none';}
   });
+  // 2) Paginate the matches — only the current page's slice is shown.
+  var totalPages=Math.max(1,Math.ceil(matches.length/PAGE_SIZE));
+  if(state.page>totalPages)state.page=totalPages;
+  if(state.page<1)state.page=1;
+  var start=(state.page-1)*PAGE_SIZE, end=start+PAGE_SIZE;
+  matches.forEach(function(t,i){t.style.display=(i>=start&&i<end)?'':'none';});
   document.querySelectorAll('.file-group').forEach(function(g){
     var vis=[].some.call(g.querySelectorAll('.test'),function(t){return t.style.display!=='none';});
     g.style.display=vis?'':'none';
   });
-  var c=document.getElementById('visible-count'); if(c)c.textContent=visible;
-  var e=document.getElementById('empty'); if(e)e.hidden=visible!==0;
+  var c=document.getElementById('visible-count'); if(c)c.textContent=matches.length;
+  var e=document.getElementById('empty'); if(e)e.hidden=matches.length!==0;
+  renderPager(matches.length,totalPages);
+}
+function renderPager(count,totalPages){
+  var pager=document.getElementById('pager'); if(!pager)return;
+  // Only show the pager once there's more than one page to move through.
+  if(count<=PAGE_SIZE){pager.hidden=true;return;}
+  pager.hidden=false;
+  var start=(state.page-1)*PAGE_SIZE+1, end=Math.min(count,state.page*PAGE_SIZE);
+  var lbl=document.getElementById('pager-page'); if(lbl)lbl.textContent='Page '+state.page+' / '+totalPages;
+  var info=document.getElementById('pager-info'); if(info)info.textContent=start+'–'+end+' of '+count;
+  var prev=document.getElementById('pager-prev'); if(prev)prev.disabled=state.page<=1;
+  var next=document.getElementById('pager-next'); if(next)next.disabled=state.page>=totalPages;
+}
+function goPage(delta){
+  state.page+=delta; apply();
+  var g=document.getElementById('groups'); if(g)g.scrollTop=0;   // top of the new page
 }
 function clearFilters(){
-  state={q:'',status:'all',plat:'all'};
+  state={q:'',status:'all',plat:'all',page:1};
   var s=document.getElementById('search'); if(s)s.value='';
   document.querySelectorAll('.filter').forEach(function(x){x.classList.toggle('active',x.dataset.filter==='all');});
   document.querySelectorAll('.filter-chip').forEach(function(x){x.classList.toggle('active',x.dataset.plat==='all');});
@@ -583,17 +614,18 @@ function clearFilters(){
 document.querySelectorAll('.filter').forEach(function(b){
   b.addEventListener('click',function(){
     document.querySelectorAll('.filter').forEach(function(x){x.classList.remove('active');});
-    b.classList.add('active'); state.status=b.dataset.filter; apply();
+    b.classList.add('active'); state.status=b.dataset.filter; state.page=1; apply();
   });
 });
 document.querySelectorAll('.filter-chip').forEach(function(b){
   b.addEventListener('click',function(){
     document.querySelectorAll('.filter-chip').forEach(function(x){x.classList.remove('active');});
-    b.classList.add('active'); state.plat=b.dataset.plat; apply();
+    b.classList.add('active'); state.plat=b.dataset.plat; state.page=1; apply();
   });
 });
 var sInp=document.getElementById('search');
-if(sInp)sInp.addEventListener('input',function(){state.q=sInp.value.trim().toLowerCase();apply();});
+if(sInp)sInp.addEventListener('input',function(){state.q=sInp.value.trim().toLowerCase();state.page=1;apply();});
+apply();   // establish the first page on load
 
 
 // ── auto-refresh (server-mode only) ──
@@ -1060,9 +1092,13 @@ body.is-failed .donut-value{stroke:var(--fail)}
 .plat-bar{height:8px;border-radius:999px;overflow:hidden;background:var(--panel-2);display:flex}
 .plat-bar > .plat-android{background:var(--brand);height:100%}
 .plat-bar > .plat-ios{background:rgba(var(--brand-rgb),.45);height:100%}
-.failing-list{display:flex;flex-direction:column;gap:8px}
-.failing-row{display:grid;grid-template-columns:1fr 60px auto;gap:8px;align-items:center}
-.failing-name{font-family:"JetBrains Mono",monospace;font-size:12.5px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.failing-list{display:flex;flex-direction:column;gap:12px}
+/* Name on its own full-width line so long test titles are readable; the bar +
+   count sit on a second row. Truncation still applies to extreme lengths, but
+   the whole card width is available first, and the title tooltip shows it all. */
+.failing-row{display:flex;flex-direction:column;gap:5px}
+.failing-name{font-family:"JetBrains Mono",monospace;font-size:12.5px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:default}
+.failing-meta{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center}
 .failing-bar-wrap{height:7px;border-radius:999px;background:var(--panel-2);overflow:hidden}
 .failing-bar{height:100%;background:var(--fail);opacity:.85;border-radius:999px}
 .failing-count{font-family:"JetBrains Mono",monospace;font-size:11.5px;color:var(--muted)}
@@ -1243,6 +1279,20 @@ body.light .error-msg{color:#7a1a2a}
 @media(max-width:960px){.dt-grid{grid-template-columns:1fr}.phone.big .phone-screen{height:auto;max-height:70vh}}
 
 .empty{text-align:center;color:var(--faint);padding:50px;font-style:italic}
+
+/* Suites list: a bounded scroll view showing one page (max 10) at a time. */
+#groups{max-height:620px;overflow-y:auto;overflow-x:hidden}
+#groups::-webkit-scrollbar{width:9px}
+#groups::-webkit-scrollbar-thumb{background:var(--line);border-radius:999px}
+#groups::-webkit-scrollbar-thumb:hover{background:var(--faint)}
+.pager{display:flex;align-items:center;justify-content:center;gap:14px;margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
+.pager[hidden]{display:none}
+.pager-btn{font-family:"JetBrains Mono",monospace;font-size:13px;color:var(--ink);background:var(--panel);
+  border:1px solid var(--line);border-radius:8px;padding:6px 13px;cursor:pointer;transition:.15s}
+.pager-btn:hover:not(:disabled){border-color:var(--brand);color:var(--brand)}
+.pager-btn:disabled{opacity:.4;cursor:not-allowed}
+.pager-page{font-family:"JetBrains Mono",monospace;font-size:13px;color:var(--ink);font-weight:600}
+.pager-info{font-family:"JetBrains Mono",monospace;font-size:12px;color:var(--muted)}
 
 .footer{margin-top:48px;padding-top:20px;border-top:1px solid var(--line);display:flex;
   justify-content:space-between;gap:16px;flex-wrap:wrap;font-size:12.5px;color:var(--muted)}

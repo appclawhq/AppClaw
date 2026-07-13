@@ -10,6 +10,7 @@ import { z } from 'zod';
 import { buildModel } from '../llm/provider.js';
 import { Config } from '../config.js';
 import type { FlowStep } from './types.js';
+import { addUsage } from './usage-context.js';
 
 // Spatial qualifier disambiguating which matching element to act on, e.g.
 // "the login button below the password field". Set BOTH fields together or neither.
@@ -146,6 +147,10 @@ export async function resolveNaturalStep(instruction: string): Promise<ResolvedS
       anthropic: { thinking: { type: 'disabled' } },
     },
   });
+
+  // Feed the active run's usage sink (SDK/runner cost accounting). No-op outside
+  // an `app.run()` async context. See flow/usage-context.ts.
+  addUsage({ inputTokens: usage.inputTokens ?? 0, outputTokens: usage.outputTokens ?? 0 });
 
   return {
     step: { ...object.step, verbatim: instruction } as FlowStep,

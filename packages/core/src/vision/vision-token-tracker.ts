@@ -6,6 +6,8 @@
  * flow/run, then getVisionTokens() to read the totals.
  */
 
+import { addVisionUsage } from '../flow/usage-context.js';
+
 export interface VisionTokenTotals {
   inputTokens: number;
   outputTokens: number;
@@ -38,4 +40,14 @@ export function trackVisionTokenUsage(usage: {
   _totals.outputTokens += usage.outputTokens;
   _totals.totalTokens += usage.totalTokens;
   _totals.cachedTokens += usage.cachedTokens ?? 0;
+
+  // Also feed the active per-run sink's *vision* bucket so SDK/runner cost
+  // accounting prices these tokens by the vision model (e.g. a free local Qwen),
+  // not the text model. Concurrency-safe; no-op outside an `app.run()` context.
+  // The module-global `_totals` above stays for the YAML-flow path.
+  addVisionUsage({
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    cachedTokens: usage.cachedTokens ?? 0,
+  });
 }

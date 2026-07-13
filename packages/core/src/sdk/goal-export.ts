@@ -4,7 +4,7 @@
  * After `app.runGoal(goal)` finishes, the agent leaves behind a `history` of
  * tool-call decisions (find_and_click, find_and_type, launch_app, …). This
  * module translates those decisions back into the natural-language form that
- * `app.run(...)` accepts, then renders a complete vitest spec file.
+ * `app.run(...)` accepts, then renders a complete AppClaw runner spec file.
  *
  * Why translate back to natural language instead of dumping raw tool calls?
  * The SDK's `app.run()` is the supported public surface — `find_and_click` is
@@ -18,15 +18,19 @@ import type { ToolCallDecision } from '../llm/provider.js';
 /** Subset of AppClawOptions worth pinning into the generated test header. */
 export interface GenerateSdkTestConfig {
   provider?: string;
+  /** Recorded platform — noted in the header comment for traceability. */
   platform?: string;
   agentMode?: string;
-  /** Module path used in the generated `import { AppClaw } from '<...>'`. Default: 'appclaw'. */
+  /** Module the runner `test`/`describe` are imported from. Default: '@appclaw/runner'. */
   sdkImport?: string;
-  /** `describe(...)` block title. Default: 'Goal replay'. */
+  /** `describe(...)` block title. Default: 'Recorded flow'. */
   describeName?: string;
-  /** `it(...)` test title. Default: the goal text. */
+  /** `test(...)` title. Default: derived from the recorded steps. */
   testName?: string;
-  /** vitest timeout in ms. Default: 120000. */
+  /**
+   * Deprecated — the runner owns per-test timeouts via appclaw.config.ts, so this
+   * is no longer emitted. Kept for backward compatibility with older callers.
+   */
   timeoutMs?: number;
 }
 
@@ -148,9 +152,9 @@ export function instructionsFromHistory(history: StepRecord[]): string[] {
 }
 
 /**
- * Render a complete vitest spec file that replays the agent's trajectory via
+ * Render a complete AppClaw runner spec that replays the agent's trajectory via
  * `app.run(...)` calls. The output is ready to write to disk and run with
- * `vitest run path/to/file`.
+ * `appclaw-runner path/to/file`.
  */
 export function generateSdkTest(opts: {
   goal: string;
@@ -166,7 +170,7 @@ export function generateSdkTest(opts: {
 }
 
 /**
- * Render a vitest spec from a flat list of natural-language instructions.
+ * Render an AppClaw runner spec from a flat list of natural-language instructions.
  *
  * Used by the playground (`/export some.test.ts`) where steps are already in
  * `app.run()`-ready form — no agent history to translate. The optional `goal`
@@ -193,20 +197,15 @@ function renderSdkTest(opts: {
 }): string {
   const cfg = opts.config ?? {};
   const { instructions, goal } = opts;
-  const sdkImport = cfg.sdkImport ?? 'appclaw';
+  const runnerImport = cfg.sdkImport ?? '@appclaw/runner';
   const describeName = cfg.describeName ?? 'Recorded flow';
   // Default test name describes what the steps DO, not what the goal asked for.
   // The original goal is preserved in the file header comment for traceability.
   const testName = cfg.testName ?? defaultTestNameFromSteps(instructions);
-  const timeoutMs = cfg.timeoutMs ?? 120000;
   const agentStepsUsed = opts.agentStepsUsed;
 
-  const optionLines: string[] = [];
-  if (cfg.provider) optionLines.push(`      provider: ${JSON.stringify(cfg.provider)},`);
-  optionLines.push(`      apiKey: process.env.LLM_API_KEY,`);
-  if (cfg.platform) optionLines.push(`      platform: ${JSON.stringify(cfg.platform)},`);
-  if (cfg.agentMode) optionLines.push(`      agentMode: ${JSON.stringify(cfg.agentMode)},`);
-
+  // Runner tests receive `app` from the fixture and run one natural-language
+  // step per `app.run(...)` — no client construction, no teardown.
   const runLines = instructions.map((i) => `    await app.run(${JSON.stringify(i)});`);
 
   const fromAgent = agentStepsUsed !== undefined;
@@ -216,6 +215,7 @@ function renderSdkTest(opts: {
   const stepsLine = fromAgent
     ? `Steps recorded: ${instructions.length} (from ${agentStepsUsed} agent step${agentStepsUsed === 1 ? '' : 's'})`
     : `Steps recorded: ${instructions.length}`;
+  const platformLine = cfg.platform ? `\n * Recorded on: ${cfg.platform}` : '';
 
   // Caveats vary by source: agent-mode exports inherit non-determinism from the
   // LLM trajectory; playground exports are user-validated steps and only need a
@@ -238,11 +238,11 @@ function renderSdkTest(opts: {
         '   cross-check against the AgentResult.history.',
         '',
         '4. Edit freely. Treat this file as a draft: rename the test, add assertions',
-        '   (`app.verify(...)`), tighten selectors, split into multiple `it()` blocks.',
+        '   (`app.verify(...)`), tighten selectors, split into multiple `test()` blocks.',
       ]
     : [
         '1. Each step is the verbatim text you typed in the playground — exactly',
-        '   what `AppClaw.run()` will receive. There is no translator in between,',
+        '   what `app.run()` will receive. There is no translator in between,',
         '   so the replay should behave identically to the playground session.',
         '',
         '2. Selectors are still locator strings, not stable IDs. If the app UI',
@@ -250,7 +250,7 @@ function renderSdkTest(opts: {
         '   selectors above may need updating.',
         '',
         '3. Edit freely. Treat this file as a draft: rename the test, add',
-        '   assertions (`app.verify(...)`), split into multiple `it()` blocks.',
+        '   assertions (`app.verify(...)`), split into multiple `test()` blocks.',
       ];
 
   const caveatBlock = caveats.map((l) => ` * ${l}`.replace(/ +$/, '')).join('\n');
@@ -259,26 +259,22 @@ function renderSdkTest(opts: {
  * Generated by AppClaw — a replayable starting point, not a final test.
  *
  * ${goalLine}
- * ${stepsLine}
+ * ${stepsLine}${platformLine}
+ *
+ * Runs with the AppClaw runner (\`appclaw-runner\`). The runner injects a ready
+ * \`app\` and owns the device session — provider, apiKey, and platform come from
+ * appclaw.config.ts, so there is no client to construct or tear down here.
  *
  * Caveats — read before running this in CI:
  *
 ${caveatBlock}
  */
-import { AppClaw } from ${JSON.stringify(sdkImport)};
-import { describe, it } from 'vitest';
-import 'dotenv/config';
+import { describe, test } from ${JSON.stringify(runnerImport)};
 
 describe(${JSON.stringify(describeName)}, () => {
-  it(${JSON.stringify(testName)}, async () => {
-    const app = new AppClaw({
-${optionLines.join('\n')}
-    });
-
+  test(${JSON.stringify(testName)}, async ({ app }) => {
 ${runLines.join('\n')}
-
-    await app.teardown();
-  }, ${timeoutMs});
+  });
 });
 `;
 }

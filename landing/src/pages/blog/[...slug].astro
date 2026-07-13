@@ -1,0 +1,71 @@
+---
+import { getCollection, render } from "astro:content";
+import BlogLayout from "../../layouts/BlogLayout.astro";
+
+export async function getStaticPaths() {
+  const posts = (await getCollection("blog")).filter((p) => !p.data.draft);
+  return posts.map((post) => ({ params: { slug: post.id }, props: { post } }));
+}
+
+const { post } = Astro.props;
+const { Content } = await render(post);
+
+const CAT_LABEL: Record<string, string> = {
+  product: "Product",
+  engineering: "Engineering",
+  "field-notes": "Field notes",
+};
+const accent =
+  post.data.category === "engineering"
+    ? "acc-amber"
+    : post.data.category === "field-notes"
+      ? "acc-indigo"
+      : "acc-emerald";
+
+const fmt = (d: Date) =>
+  d.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+
+// rough reading time from raw markdown body
+const words = post.body ? post.body.trim().split(/\s+/).length : 0;
+const readMins = Math.max(1, Math.round(words / 210));
+---
+
+<BlogLayout
+  title={`${post.data.title} · AppClaw`}
+  description={post.data.description}
+  accent={accent}
+>
+  <article class="post wrap narrow" style="padding-left:0;padding-right:0">
+    <a class="post-back" href="/blog">
+      <svg class="ico sm" viewBox="0 0 24 24"><path d="M19 12H5M11 18l-6-6 6-6" /></svg>
+      All posts
+    </a>
+
+    <div class="post-meta">
+      <span class="cat">{CAT_LABEL[post.data.category]}</span>
+      <span class="sep">·</span>
+      <span>{fmt(post.data.date)}</span>
+      <span class="sep">·</span>
+      <span>{readMins} min read</span>
+    </div>
+
+    <h1>{post.data.title}</h1>
+    <p class="dek">{post.data.description}</p>
+    <div class="rule"></div>
+
+    {post.data.cover && (
+      <figure class="post-cover rv in">
+        <img src={post.data.cover} alt={post.data.coverAlt ?? post.data.title} loading="eager" />
+      </figure>
+    )}
+
+    <div class="prose">
+      <Content />
+    </div>
+
+    <div class="post-foot">
+      <div class="sig">Written by <b>{post.data.author}</b></div>
+      <a class="btn sm alt" href="/blog">← More writing</a>
+    </div>
+  </article>
+</BlogLayout>

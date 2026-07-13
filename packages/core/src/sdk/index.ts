@@ -31,7 +31,14 @@ import {
   type GenerateSdkTestConfig,
 } from './goal-export.js';
 import { RunArtifactCollector } from '../report/writer.js';
-import type { HookRecord } from '../report/types.js';
+import type { HookRecord, RunUsage } from '../report/types.js';
+import {
+  usageStorage,
+  newUsageSink,
+  buildRunUsage,
+  type UsageSink,
+} from '../flow/usage-context.js';
+import { DEFAULT_MODELS } from '../constants.js';
 import { getOsVersion } from '../vision/window-size.js';
 import { silenceTerminalUI } from '../ui/terminal.js';
 import type {
@@ -61,6 +68,12 @@ export class AppClaw {
 
   // ── Report state ───────────────────────────────────────────
   private readonly collector: RunArtifactCollector | null;
+  /** Resolved text/reasoning model id used for LLM cost pricing. */
+  private readonly model: string | undefined;
+  /** Resolved vision model id used for pricing vision-locate tokens separately. */
+  private readonly visionModel: string | undefined;
+  /** Per-instance token accumulator (shared with the collector when reporting). */
+  private readonly usageSink: UsageSink;
   private readonly videoEnabled: boolean;
   private readonly silent: boolean;
   private readonly failOnError: boolean;
@@ -132,6 +145,25 @@ export class AppClaw {
             options.reportFile
           )
         : null;
+
+    // Resolve the model used for LLM pricing (explicit LLM_MODEL, else the
+    // provider default). Feed it to the collector so cost lands in the manifest.
+    this.model = this.config.LLM_MODEL || DEFAULT_MODELS[this.config.LLM_PROVIDER] || undefined;
+    // Vision runs on its own model/endpoint. Prefer the explicit STARK_VISION_MODEL
+    // (what a local Qwen server reports); else, when the LLM provider is Gemini,
+    // Stark reuses LLM_MODEL. Otherwise unknown → priced at $0 (honest for local).
+    this.visionModel =
+      this.config.STARK_VISION_MODEL ||
+      (this.config.LLM_PROVIDER === 'gemini' ? this.model : undefined);
+    if (this.collector) {
+      this.collector.model = this.model;
+      this.collector.visionModel = this.visionModel;
+    }
+    // The per-instance usage sink IS the collector's live accumulator when
+    // reporting is on, so finalize() reads exactly what `run()` counted.
+    // Falls back to a private object when reporting is disabled so `usage()`
+    // still works for standalone callers.
+    this.usageSink = this.collector?.usage ?? newUsageSink();
 
     this.videoEnabled = options.video === true;
 
@@ -238,7 +270,10 @@ export class AppClaw {
       scroll,
       this.locatorCache ?? undefined
     );
-    const result = await runner.run(instruction);
+    // Run inside this instance's usage sink so every LLM call on the step's
+    // async call-stack (DOM resolver + vision locate) is attributed to this
+    // test — concurrency-safe across parallel runner workers. See usage-context.ts.
+    const result = await usageStorage.run(this.usageSink, () => runner.run(instruction));
 
     // Track first failure for report finalization
     if (!result.success && this.runSuccess) {
@@ -359,6 +394,16 @@ export class AppClaw {
    */
   get runId(): string | undefined {
     return this.collector?.runId;
+  }
+
+  /**
+   * LLM token usage + USD cost accumulated by this instance so far, across every
+   * model call (DOM step resolution + vision locate). The runner reads this after
+   * each test for its per-test and suite-total cost display. Cost is 0 for
+   * un-priced/local models; `totalTokens` is always the honest count.
+   */
+  usage(): RunUsage {
+    return buildRunUsage(this.usageSink, this.model, this.visionModel);
   }
 
   /**

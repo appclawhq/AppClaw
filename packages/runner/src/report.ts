@@ -11,6 +11,7 @@ import * as crypto from 'crypto';
 import { writeSuiteEntry } from '@appclaw/core/report/writer';
 import { generateSuiteReport, type SuiteReportMeta } from './suite-report.js';
 import type { SuiteResult } from './types.js';
+import { formatUsage, formatTokens, formatCost } from './usage.js';
 
 /** A fresh suite id: `suite-20260628T101500-ab12cd`. */
 export function newSuiteId(): string {
@@ -82,8 +83,10 @@ export function printSummary(suite: SuiteResult): void {
       const dev = r.device ? ` [${r.device.name}]` : '';
       const dur = r.durationMs ? ` ${(r.durationMs / 1000).toFixed(1)}s` : '';
       const retry = r.retries > 0 ? ` ↻${r.retries}` : '';
+      const cost = formatUsage(r.usage);
+      const usage = cost ? ` · ${cost}` : '';
       const tail = r.error ? ` — ${r.error}` : '';
-      log(`    ${icon} ${r.title}${dev}${dur}${retry}${tail}`);
+      log(`    ${icon} ${r.title}${dev}${dur}${retry}${usage}${tail}`);
     }
   }
   log('');
@@ -91,5 +94,13 @@ export function printSummary(suite: SuiteResult): void {
   if (failed) parts.push(`${failed} failed`);
   if (skipped) parts.push(`${skipped} skipped`);
   log(`  ${parts.join(', ')}  (${(durationMs / 1000).toFixed(1)}s)`);
+  // Suite-wide LLM cost — only when at least one test used a model.
+  if (suite.usage && suite.usage.totalTokens > 0) {
+    const u = suite.usage;
+    log(
+      `  LLM ${formatTokens(u.totalTokens)} tokens ` +
+        `(${formatTokens(u.inputTokens)} in / ${formatTokens(u.outputTokens)} out) · ${formatCost(u.cost)} total`
+    );
+  }
   log('');
 }

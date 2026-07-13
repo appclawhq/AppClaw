@@ -22,8 +22,15 @@ import type { LocatorCacheCtx } from './locator-cache.js';
 import { getCachedScreenSize, getScreenSizeForStark } from '../vision/window-size.js';
 import { pngDimensionsFromBase64 } from '../vision/png-dimensions.js';
 import { printStepResult } from '../ui/step-printer.js';
+import { usageStorage, buildRunUsage, type UsageSink } from '../flow/usage-context.js';
+import type { RunUsage } from '../report/types.js';
 import type { AppResolver } from '../agent/app-resolver.js';
 import type { RunResult } from './types.js';
+
+/** Tokens a step actually spent = the sum of the four counter deltas. */
+function sinkSpend(s: UsageSink): number {
+  return s.inputTokens + s.outputTokens + s.visionInputTokens + s.visionOutputTokens;
+}
 
 function extractCoordinates(message?: string): { x: number; y: number } | undefined {
   if (!message) return undefined;
@@ -68,6 +75,14 @@ export class StepRunner {
     // Only pay for a pre-tap screenshot when we're actually recording a report.
     setPreActionCapture(!!this.collector);
 
+    // Snapshot the run's usage sink so we can attribute exactly this step's
+    // token spend (the delta across execution) to its report row. The sink
+    // mutates in place as LLM/vision calls fire, so we copy the counters now
+    // and diff against the same live object afterwards. Undefined when there's
+    // no active sink (e.g. reporting disabled) → per-step cost is simply omitted.
+    const sink = usageStorage.getStore();
+    const before: UsageSink | undefined = sink ? { ...sink } : undefined;
+
     // All "instruction → step → executed" logic lives in runOneInstruction so
     // the SDK and playground stay in lockstep. See src/flow/run-instruction.ts.
     const { step, result } = await runOneInstruction(this.mcp, instruction, {
@@ -76,6 +91,23 @@ export class StepRunner {
       scroll: this.scroll,
       locatorCache: this.locatorCache,
     });
+
+    // Price just this step's token delta, using the run's text/vision models.
+    // Omitted when the step spent nothing (regex/DOM resolution or cache hit).
+    let stepUsage: RunUsage | undefined;
+    if (sink && before) {
+      const delta: UsageSink = {
+        inputTokens: sink.inputTokens - before.inputTokens,
+        outputTokens: sink.outputTokens - before.outputTokens,
+        cachedTokens: sink.cachedTokens - before.cachedTokens,
+        visionInputTokens: sink.visionInputTokens - before.visionInputTokens,
+        visionOutputTokens: sink.visionOutputTokens - before.visionOutputTokens,
+        visionCachedTokens: sink.visionCachedTokens - before.visionCachedTokens,
+      };
+      if (sinkSpend(delta) > 0) {
+        stepUsage = buildRunUsage(delta, this.collector?.model, this.collector?.visionModel);
+      }
+    }
 
     if (this.collector && this.stepIndex !== undefined) {
       const tapCoords = extractCoordinates(result.message);
@@ -115,6 +147,7 @@ export class StepRunner {
         tapCoordinates: tapCoords,
         deviceScreenSize: deviceSize,
         cacheHit: result.cacheHit,
+        usage: stepUsage,
       });
 
       if (shot) {

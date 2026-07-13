@@ -19,5 +19,7 @@ describe('Login', () => {
     await tapLogin(app);
     await app.run('Click on slider');
     await app.verify('two green dot is visisble');
+    await app.run('swipe the first green dot to the right');
+    await app.verify('the first green dot is on the right');
   });
 });

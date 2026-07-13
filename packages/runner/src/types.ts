@@ -9,10 +9,12 @@
 
 import type { AppClaw } from '@appclaw/core';
 import type { AppClawOptions, Platform } from '@appclaw/core/sdk/types';
+import type { RunUsage } from '@appclaw/core/report/types';
 import type { FixtureDefs } from './fixtures.js';
 
 export type { Platform, AgentMode, LLMProvider } from '@appclaw/core/sdk/types';
 export type { AppClawOptions } from '@appclaw/core/sdk/types';
+export type { RunUsage } from '@appclaw/core/report/types';
 
 /** A device the scheduler can lease. Discovered from a node's `select_device`. */
 export interface Device {
@@ -217,6 +219,8 @@ export interface TestResult {
   file?: string;
   /** Report run id — links to the on-disk manifest at `.appclaw/runs/<runId>/`. */
   runId?: string;
+  /** LLM token usage + USD cost for this test (across DOM + vision model calls). */
+  usage?: RunUsage;
 }
 
 /** Aggregate result of the whole run. */
@@ -227,4 +231,6 @@ export interface SuiteResult {
   skipped: number;
   allPassed: boolean;
   durationMs: number;
+  /** Suite-wide LLM token totals + USD cost (sum of every test's `usage`). */
+  usage?: RunUsage;
 }

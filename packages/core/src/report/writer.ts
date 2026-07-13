@@ -23,9 +23,11 @@ import type {
   StepArtifact,
   StepStatus,
   HookRecord,
+  RunUsage,
 } from './types.js';
 import type { FlowMeta, FlowPhase } from '../flow/types.js';
 import type { RunYamlFlowResult } from '../flow/run-yaml-flow.js';
+import { newUsageSink, buildRunUsage, type UsageSink } from '../flow/usage-context.js';
 
 /* ─── Helpers ────────────────────────────────────────────── */
 
@@ -93,6 +95,8 @@ export interface StepCollectorEntry {
    * users can see hit-rate during rollout.
    */
   cacheHit?: boolean;
+  /** Per-step LLM usage + cost (delta of the run sink across this step). */
+  usage?: RunUsage;
 }
 
 /**
@@ -104,6 +108,16 @@ export class RunArtifactCollector {
   readonly startedAt: string;
   /** Device OS version ("Android 14" / "iOS 17.2"), set once per run when known. */
   deviceVersion?: string;
+  /**
+   * Live LLM token accumulator for this run. `AppClaw` points its per-instance
+   * usage sink at this object, so counts land here as the agent runs; cost is
+   * computed from `model` at finalize.
+   */
+  usage: UsageSink = newUsageSink();
+  /** Resolved text model id for pricing (set once by AppClaw, like deviceVersion). */
+  model?: string;
+  /** Resolved vision model id — prices the sink's vision bucket separately. */
+  visionModel?: string;
   private appiumMcpLog?: string;
   private steps: StepCollectorEntry[] = [];
   private hooks: HookRecord[] = [];
@@ -236,6 +250,7 @@ export class RunArtifactCollector {
         screenshotSize: step.screenshotSize,
         videoOffsetMs: step.videoOffsetMs,
         cacheHit: step.cacheHit,
+        usage: step.usage,
       });
     }
 
@@ -272,6 +287,14 @@ export class RunArtifactCollector {
       specFile: this.specFile,
       hooks: this.hooks.length ? this.hooks : undefined,
       failureLogs: this.appiumMcpLog ? { appiumMcp: this.appiumMcpLog } : undefined,
+      usage:
+        this.usage.inputTokens +
+          this.usage.outputTokens +
+          this.usage.visionInputTokens +
+          this.usage.visionOutputTokens >
+        0
+          ? buildRunUsage(this.usage, this.model, this.visionModel)
+          : undefined,
     };
 
     // Write manifest

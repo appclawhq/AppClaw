@@ -306,10 +306,10 @@ function resolvePlaygroundExportPath(filename: string, asSdkTest: boolean): stri
 }
 
 /**
- * Build the vitest spec body for the current playground state.
+ * Build the AppClaw runner spec body for the current playground state.
  * Each recorded step's `verbatim` (the user's original natural-language text)
  * becomes one `await app.run(...)` call — no translation needed because the
- * playground already accepts the same syntax that `AppClaw.run()` does.
+ * playground already accepts the same syntax that `app.run()` does.
  */
 function buildSdkTestString(): string {
   const instructions = state.steps

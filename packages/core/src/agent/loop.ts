@@ -31,6 +31,7 @@ import type { AppResolver } from './app-resolver.js';
 import { preprocessAction, resolveAppId } from './preprocessor.js';
 import { activateAppWithFallback } from '../mcp/activate-app.js';
 import { MODEL_PRICING } from '../constants.js';
+import { addUsage } from '../flow/usage-context.js';
 import * as ui from '../ui/terminal.js';
 import { EpisodicRecorder } from '../memory/recorder.js';
 import { loadStore } from '../memory/store.js';
@@ -622,6 +623,14 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
       totalInputTokens += decision.usage.inputTokens;
       totalOutputTokens += decision.usage.outputTokens;
       totalCachedTokens += decision.usage.cachedTokens ?? 0;
+      // Feed the active per-run sink too, so runner tests that drive the agent
+      // loop (`app.runGoal`) report cost alongside `app.run` steps. No-op outside
+      // an SDK usage context. See flow/usage-context.ts.
+      addUsage({
+        inputTokens: decision.usage.inputTokens,
+        outputTokens: decision.usage.outputTokens,
+        cachedTokens: decision.usage.cachedTokens ?? 0,
+      });
       ui.printStepTokens(
         decision.usage.inputTokens,
         decision.usage.outputTokens,

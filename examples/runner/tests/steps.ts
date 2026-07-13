@@ -8,5 +8,9 @@ import type { AppClaw } from '@appclaw/core';
 
 /** Tap the login button — the common entry step for the VodQA flows. */
 export async function tapLogin(app: AppClaw): Promise<void> {
+  await app.run('Click on username field');
+  await app.run('Type admin into the username field');
+  await app.run('Click on password field');
+  await app.run('Type admin into the password field');
   await app.run('Click on login button');
 }

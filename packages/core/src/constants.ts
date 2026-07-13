@@ -51,3 +51,16 @@ export const MODEL_PRICING: Record<string, [number, number]> = {
   // Groq (free tier / no cost)
   'llama-3.3-70b-versatile': [0, 0],
 };
+
+/**
+ * USD cost for a token count under a given model. Unknown models (local Ollama,
+ * un-priced ids) resolve to 0 — the token counts are still reported, just untaxed.
+ */
+export function computeUsdCost(
+  model: string | undefined,
+  inputTokens: number,
+  outputTokens: number
+): number {
+  const pricing = (model && MODEL_PRICING[model]) || [0, 0];
+  return (inputTokens / 1_000_000) * pricing[0] + (outputTokens / 1_000_000) * pricing[1];
+}

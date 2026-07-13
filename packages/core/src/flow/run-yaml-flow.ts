@@ -77,7 +77,11 @@ import {
 import type { ScrollDistance } from '../sdk/types.js';
 import chalk from 'chalk';
 import * as ui from '../ui/terminal.js';
-import { resetVisionTokens, getVisionTokens } from '../vision/vision-token-tracker.js';
+import {
+  resetVisionTokens,
+  getVisionTokens,
+  trackVisionTokenUsage,
+} from '../vision/vision-token-tracker.js';
 
 /** Extract [x, y] coordinates from an action result message like 'Tapped "X" via vision at [320, 540]' */
 function extractCoordinates(message?: string): { x: number; y: number } | undefined {
@@ -1367,6 +1371,11 @@ async function visionAssert(mcp: MCPClient, text: string): Promise<boolean> {
     apiKey: apiKey || 'local',
     model: getStarkVisionModel(),
     disableThinking: true,
+    // Report token usage like every other vision call-site (vision-execute,
+    // stark-locate). Without this, vision-fallback assertions ran a real model
+    // call but their tokens/cost were silently dropped from the run's usage —
+    // so a "verify … (via vision)" step showed $0 in the report.
+    onTokenUsage: trackVisionTokenUsage,
     ...(baseUrl && { baseUrl }),
     ...(baseUrl && { coordinateOrder: getStarkVisionCoordinateOrder() }),
   });

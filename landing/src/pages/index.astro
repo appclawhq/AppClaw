@@ -3,6 +3,7 @@
 // Menlo mono identity + teal-blue accent, light. Hairline borders, soft
 // shadows, calm motion, line icons, a detector-style locator (not a claw).
 // Self-contained, served at / (the default homepage).
+import { getCollection } from "astro:content";
 
 const GH = "https://github.com/AppiumTestDistribution/appclaw";
 const QUICKSTART = `${GH}#quick-start`;
@@ -50,6 +51,14 @@ const RACK = Array.from({ length: 24 }, (_, i) => {
 const rackRunning = RACK.filter((d) => d.s === "run").length;
 const rackPassed = RACK.filter((d) => d.s === "pass").length;
 const rackQueued = RACK.filter((d) => d.s === "idle").length;
+
+// latest blog posts for the homepage teaser
+const CAT_LABEL = { product: "Product", engineering: "Engineering", "field-notes": "Field notes" };
+const posts = (await getCollection("blog"))
+  .filter((p) => !p.data.draft)
+  .sort((a, b) => b.data.date.valueOf() - a.data.date.valueOf())
+  .slice(0, 3);
+const fmtDate = (d) => d.toLocaleDateString("en-US", { month: "short", day: "2-digit", year: "numeric" });
 ---
 
 <!doctype html>
@@ -493,10 +502,29 @@ const rackQueued = RACK.filter((d) => d.s === "idle").length;
       .ribbon { position: fixed; bottom: 16px; left: 16px; z-index: 200; font-family: var(--font-mono); font-size: 11px; color: var(--ink-soft); background: var(--card); padding: 7px 13px; border: 1px solid var(--line-2); border-radius: 8px; box-shadow: 0 6px 20px -10px rgba(20,22,27,0.3); }
       .ribbon:hover { border-color: var(--ink-faint); }
 
+      /* WRITING / blog teaser */
+      .writing-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; flex-wrap: wrap; margin-bottom: 34px; }
+      .writing-head .lk { font-family: var(--font-mono); font-size: 13px; color: var(--accent-deep); display: inline-flex; align-items: center; gap: 7px; }
+      .writing-head .lk:hover { text-decoration: underline; }
+      .writing { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+      .post-card { padding: 24px; display: flex; flex-direction: column; position: relative; }
+      .post-card .pc-meta { font-family: var(--font-mono); font-size: 11px; color: var(--ink-faint); display: flex; align-items: center; gap: 8px; }
+      .post-card .pc-meta .cat { color: var(--accent-deep); font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
+      .post-card .pc-meta .sep { color: var(--line-2); }
+      .post-card h3 { font-size: 19px; letter-spacing: -0.01em; margin-top: 15px; }
+      .post-card:hover h3 { color: var(--accent-deep); }
+      .post-card p { color: var(--ink-soft); font-size: 14px; line-height: 1.55; margin-top: 10px; }
+      .post-card .pc-go { margin-top: auto; padding-top: 18px; font-family: var(--font-mono); font-size: 12px; color: var(--accent-deep); }
+      .post-card a.cover { position: absolute; inset: 0; }
+      .post-card.engineering { --accent: #d8870f; --accent-deep: #a8680a; --accent-soft: #fbf0dc; --accent-line: #f2e0bd; }
+      .post-card.field-notes { --accent: #5b6cff; --accent-deep: #4453d6; --accent-soft: #eceeff; --accent-line: #d6dbff; }
+      html.dark .post-card.engineering { --accent: #f0b44e; --accent-deep: #f4c267; }
+      html.dark .post-card.field-notes { --accent: #8b97ff; --accent-deep: #9aa4ff; }
+
       @media (max-width: 980px) {
         .hero-grid, .prox-grid, .ag-grid, .ctx-grid, .dp-grid, .stmt, .agoal-grid { grid-template-columns: 1fr; gap: 40px; }
         .dp-mid { flex-direction: row; min-height: 40px; } .dp-mid .vl { display: none; }
-        .modes, .steps { grid-template-columns: 1fr; }
+        .modes, .steps, .writing { grid-template-columns: 1fr; }
         .arch2 { grid-template-columns: 1fr; gap: 6px; }
         .wire { padding: 8px 0; } .wire .cable { display: none; } .wire .down { display: block; }
         .foot-grid { grid-template-columns: 1fr 1fr; }
@@ -516,6 +544,7 @@ const rackQueued = RACK.filter((d) => d.s === "idle").length;
           <a href="#parallel">Parallel</a>
           <a href="#modes">Modes</a>
           <a href="#arch">Architecture</a>
+          <a href="/blog">Blog</a>
         </div>
         <div class="nav-cta">
           <button class="theme-sw" id="themeToggle" type="button" role="switch" aria-label="Toggle dark mode" title="Toggle light / dark">
@@ -901,6 +930,35 @@ const rackQueued = RACK.filter((d) => d.s === "idle").length;
         </div>
       </section>
 
+      <!-- WRITING -->
+      {posts.length > 0 && (
+        <section class="block acc-emerald" id="writing" style="border-top:1px solid var(--line)">
+          <div class="writing-head rv">
+            <div class="sec-head" style="margin-bottom:0">
+              <span class="eyebrow">The logbook</span>
+              <h2>From the <span class="ac">blog</span></h2>
+              <p>How the agent reads a screen, when to reach for YAML, and where AI is taking mobile testing.</p>
+            </div>
+            <a class="lk" href="/blog">All posts <svg class="ico sm" viewBox="0 0 24 24" style="width:14px;height:14px"><path d="M5 12h14M13 6l6 6-6 6" /></svg></a>
+          </div>
+          <div class="writing">
+            {posts.map((p, i) => (
+              <article class={`card soft hover post-card ${p.data.category} rv ${i === 1 ? "d1" : i === 2 ? "d2" : ""}`}>
+                <div class="pc-meta">
+                  <span class="cat">{CAT_LABEL[p.data.category]}</span>
+                  <span class="sep">·</span>
+                  <span>{fmtDate(p.data.date)}</span>
+                </div>
+                <h3>{p.data.title}</h3>
+                <p>{p.data.description}</p>
+                <div class="pc-go">Read →</div>
+                <a class="cover" href={`/blog/${p.id}`} aria-label={p.data.title}></a>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
+
       <!-- CTA -->
       <section class="block">
         <div class="cta rv">
@@ -922,7 +980,7 @@ const rackQueued = RACK.filter((d) => d.s === "idle").length;
             <p>The mobile automation agent. Tell it what you want in plain English, it resolves the rest.</p>
           </div>
           <div><h6>Product</h6><ul><li><a href="#agentic">Agentic goal</a></li><li><a href="#context">Memory &amp; guides</a></li><li><a href="#modes">Modes</a></li><li><a href="#locate">Locators</a></li><li><a href="#parallel">Parallel</a></li></ul></div>
-          <div><h6>Developers</h6><ul><li><a href={QUICKSTART} target="_blank" rel="noopener">Quick Start</a></li><li><a href="https://www.npmjs.com/package/appclaw" target="_blank" rel="noopener">CLI (npm)</a></li><li><a href={MARKETPLACE} target="_blank" rel="noopener">Extension</a></li><li><a href="/usage.html">Usage Guide</a></li></ul></div>
+          <div><h6>Developers</h6><ul><li><a href={QUICKSTART} target="_blank" rel="noopener">Quick Start</a></li><li><a href="https://www.npmjs.com/package/appclaw" target="_blank" rel="noopener">CLI (npm)</a></li><li><a href={MARKETPLACE} target="_blank" rel="noopener">Extension</a></li><li><a href="/usage.html">Usage Guide</a></li><li><a href="/blog">Blog</a></li></ul></div>
           <div><h6>Community</h6><ul><li><a href={`${GH}/issues`} target="_blank" rel="noopener">Issues</a></li><li><a href={`${GH}/discussions`} target="_blank" rel="noopener">Discussions</a></li><li><a href={`${GH}/blob/main/LICENSE`} target="_blank" rel="noopener">License</a></li></ul></div>
         </div>
         <div class="foot-bottom">

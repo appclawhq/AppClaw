@@ -45,12 +45,14 @@ import { PlainReporter, type RunnerReporter } from './reporter.js';
 import type {
   Device,
   ResolvedConfig,
+  RunUsage,
   SuiteResult,
   TestCase,
   TestContext,
   TestInfo,
   TestResult,
 } from './types.js';
+import { sumUsage } from './usage.js';
 
 /** Per-worker (per-device) scope tracking for beforeAll/afterAll. */
 interface WorkerScopeState {
@@ -404,6 +406,7 @@ export class Runner<State = unknown> {
     const maxRetries = tc.options.retries ?? this.config.retries;
     let lastError: Error | undefined;
     let lastRunId: string | undefined;
+    let lastUsage: RunUsage | undefined;
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       const t0 = Date.now();
@@ -485,6 +488,9 @@ export class Runner<State = unknown> {
       } catch (hookErr) {
         if (!error) error = hookErr instanceof Error ? hookErr : new Error(String(hookErr));
       } finally {
+        // Capture LLM token usage before teardown so it survives into the
+        // post-loop failed-return path (the `app` goes out of scope each attempt).
+        lastUsage = app.usage();
         // Fixture teardown (reverse order) before the session closes.
         if (fixtureTeardown) await fixtureTeardown();
         await app.teardown().catch(() => {});
@@ -497,6 +503,7 @@ export class Runner<State = unknown> {
           status: 'passed',
           durationMs: info.durationMs,
           retries: attempt,
+          usage: lastUsage,
         });
         return {
           title: tc.fullTitle,
@@ -506,6 +513,7 @@ export class Runner<State = unknown> {
           device,
           file: tc.file,
           runId: lastRunId,
+          usage: lastUsage,
         };
       }
       lastError = error;
@@ -521,6 +529,7 @@ export class Runner<State = unknown> {
       durationMs: 0,
       retries: maxRetries,
       error: lastError?.message,
+      usage: lastUsage,
     });
     return {
       title: tc.fullTitle,
@@ -531,6 +540,7 @@ export class Runner<State = unknown> {
       error: lastError?.message,
       file: tc.file,
       runId: lastRunId,
+      usage: lastUsage,
     };
   }
 
@@ -638,6 +648,14 @@ export class Runner<State = unknown> {
     const passed = results.filter((r) => r.status === 'passed').length;
     const failed = results.filter((r) => r.status === 'failed').length;
     const skipped = results.filter((r) => r.status === 'skipped').length;
-    return { results, passed, failed, skipped, allPassed: failed === 0, durationMs };
+    return {
+      results,
+      passed,
+      failed,
+      skipped,
+      allPassed: failed === 0,
+      durationMs,
+      usage: sumUsage(results),
+    };
   }
 }

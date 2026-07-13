@@ -51,11 +51,18 @@ export interface StepArtifact {
   videoOffsetMs?: number;
   /**
    * True when the SDK locator cache served this step's element resolution
-   * (bypassed DOM parse + multi-strategy probe). Surfaced in run-manifest.json
-   * so users can grep cache hit-rate during rollout. Not yet rendered in HTML —
-   * follow-up if it proves useful enough to be a first-class badge.
+   * (bypassed DOM parse + multi-strategy probe). Surfaced in the HTML report as
+   * a per-step badge and in run-manifest.json so users can grep cache hit-rate.
    */
   cacheHit?: boolean;
+  /**
+   * LLM token usage + USD cost attributable to *this step alone* — the delta of
+   * the run's usage sink across the step's execution, priced by the run's text
+   * and vision models. Absent when the step spent no tokens (deterministic
+   * regex/DOM resolution or a locator-cache hit), so a missing value reads as
+   * "this step was free". The run-level `RunManifest.usage` is the sum of these.
+   */
+  usage?: RunUsage;
 }
 
 /* ─── Run manifest (per-run JSON) ────────────────────────── */
@@ -114,6 +121,44 @@ export interface RunManifest {
   failureLogs?: {
     appiumMcp?: string;
   };
+  /**
+   * LLM token usage + USD cost for this run, aggregated across every model call
+   * the agent made (DOM step resolution + vision locate). Absent when no LLM was
+   * used (pure-regex/YAML flows) or reporting captured no usage.
+   */
+  usage?: RunUsage;
+}
+
+/** Aggregated LLM token usage + USD cost for a single run. */
+export interface RunUsage {
+  /** Combined text + vision input tokens. */
+  inputTokens: number;
+  /** Combined text + vision output tokens. */
+  outputTokens: number;
+  cachedTokens: number;
+  totalTokens: number;
+  /** Combined USD cost: text priced by `model` + vision priced by `vision.model`. */
+  cost: number;
+  /** Resolved text/reasoning model id used for pricing (e.g. "claude-sonnet-4-6"). */
+  model?: string;
+  /**
+   * Vision-model portion, present only when vision tokens were spent. Priced by
+   * its own model — a local Qwen server shows real tokens with `cost: 0`, not
+   * the text model's rate.
+   */
+  vision?: VisionUsage;
+}
+
+/** The vision-model slice of a run's usage, priced by the vision model alone. */
+export interface VisionUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cachedTokens: number;
+  totalTokens: number;
+  /** USD cost from MODEL_PRICING for `model`; 0 for un-priced/local models. */
+  cost: number;
+  /** Vision model id (e.g. "gemini-3.1-flash-lite" or a local "qwen2.5-vl-…"). */
+  model?: string;
 }
 
 export interface PhaseResultRecord {

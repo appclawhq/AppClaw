@@ -16,7 +16,8 @@
  */
 
 import { printSummary } from './report.js';
-import type { Device, SuiteResult } from './types.js';
+import type { Device, RunUsage, SuiteResult } from './types.js';
+import { formatUsage } from './usage.js';
 
 /** Run-level facts known once the pool is discovered and the queue is built. */
 export interface RunStartInfo {
@@ -50,6 +51,8 @@ export interface TestEndInfo {
   /** Retries consumed (0 = passed first try). */
   retries: number;
   error?: string;
+  /** LLM token usage + cost for this test (shown inline). */
+  usage?: RunUsage;
 }
 
 /**
@@ -103,7 +106,9 @@ export class PlainReporter implements RunnerReporter {
     const icon = info.status === 'passed' ? '✓' : '✗';
     const dur = info.durationMs ? ` ${info.durationMs}ms` : '';
     const retry = info.retries > 0 ? ` (retry ${info.retries})` : '';
-    this.log(`  ${icon} ${info.title}  [${info.device.name}]${dur}${retry}`);
+    const cost = formatUsage(info.usage);
+    const usage = cost ? ` · ${cost}` : '';
+    this.log(`  ${icon} ${info.title}  [${info.device.name}]${dur}${retry}${usage}`);
   }
 
   runEnd(suite: SuiteResult, reportPath?: string): void {

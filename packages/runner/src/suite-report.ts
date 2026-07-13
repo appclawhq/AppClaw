@@ -17,7 +17,26 @@ import { promises as fsp } from 'node:fs';
 import { loadRunManifest } from '@appclaw/core/report/writer';
 import type { Platform } from '@appclaw/core/sdk/types';
 import type { StepArtifact, HookRecord } from '@appclaw/core/report/types';
-import type { SuiteResult, TestResult } from './types.js';
+import type { RunUsage, SuiteResult, TestResult } from './types.js';
+import { formatCost, formatTokens, formatUsage } from './usage.js';
+
+/**
+ * Hover text for a test's cost badge: text-model in/out + model, and — when
+ * vision ran on its own model — a second line naming the vision model and its
+ * (often $0, local) cost, so the split pricing is legible on inspection.
+ */
+function usageTooltip(u: RunUsage): string {
+  const textIn = u.inputTokens - (u.vision?.inputTokens ?? 0);
+  const textOut = u.outputTokens - (u.vision?.outputTokens ?? 0);
+  const lines = [`text: ${textIn} in / ${textOut} out${u.model ? ` · ${u.model}` : ''}`];
+  if (u.vision && u.vision.totalTokens > 0) {
+    lines.push(
+      `vision: ${u.vision.inputTokens} in / ${u.vision.outputTokens} out` +
+        `${u.vision.model ? ` · ${u.vision.model}` : ''} · ${formatCost(u.vision.cost)}`
+    );
+  }
+  return lines.join('\n');
+}
 
 export interface SuiteReportMeta {
   suiteId: string;
@@ -48,6 +67,8 @@ interface ReportTest {
   appiumMcpLog?: string;
   /** Screen recording inlined as a base64 data URI (so the report is portable). */
   videoData?: string;
+  /** LLM token usage + USD cost for this test. */
+  usage?: RunUsage;
   /** Stable index assigned at render time; links a list row to its detail data. */
   id?: number;
 }
@@ -80,6 +101,7 @@ async function assembleTests(projectRoot: string, results: TestResult[]): Promis
         retries: r.retries,
         error: r.error,
         runId: r.runId,
+        usage: r.usage,
         steps: [],
       };
       if (!r.runId) return base;
@@ -191,6 +213,11 @@ function renderReport(suite: SuiteResult, meta: SuiteReportMeta, tests: ReportTe
   const flaky = tests.filter((t) => t.status === 'passed' && t.retries > 0).length;
   const totalSteps = tests.reduce((n, t) => n + t.steps.length, 0);
   const suiteDurationMs = suite.durationMs || tests.reduce((n, t) => n + (t.durationMs || 0), 0);
+  // Suite LLM totals — prefer the runner's own tally, else sum the test list so
+  // reports rendered from disk still show cost.
+  const usageCost = suite.usage?.cost ?? tests.reduce((n, t) => n + (t.usage?.cost ?? 0), 0);
+  const usageTokens =
+    suite.usage?.totalTokens ?? tests.reduce((n, t) => n + (t.usage?.totalTokens ?? 0), 0);
   const verdict = failed > 0 ? 'FAILED' : 'PASSED';
   // Stable id per test — shared by the list rows and the embedded detail data.
   tests.forEach((t, i) => (t.id = i));
@@ -219,6 +246,8 @@ function renderReport(suite: SuiteResult, meta: SuiteReportMeta, tests: ReportTe
       passed,
       durationMs: suiteDurationMs,
       stats: { total, passed, failed, skipped, flaky, totalSteps },
+      usageCost,
+      usageTokens,
     })}
     ${renderDevices(meta, tests)}
   </header>
@@ -259,6 +288,8 @@ function renderHero(
       flaky: number;
       totalSteps: number;
     };
+    usageCost?: number;
+    usageTokens?: number;
   }
 ): string {
   const { verdict, passRate, ran, passed, durationMs, stats } = d;
@@ -296,6 +327,15 @@ function renderHero(
     { label: 'steps', value: String(stats.totalSteps), tone: 'neutral', ratio: null },
     { label: 'duration', value: fmtDur(durationMs), tone: 'neutral', ratio: null },
   ];
+  // LLM cost cell — only when at least one test used a model.
+  if ((d.usageTokens ?? 0) > 0) {
+    cells.push({
+      label: `llm · ${formatTokens(d.usageTokens ?? 0)} tok`,
+      value: formatCost(d.usageCost ?? 0),
+      tone: 'neutral',
+      ratio: null,
+    });
+  }
   const statCells = cells
     .map((c) => {
       const pct = c.ratio == null ? null : Math.round(c.ratio * 100);
@@ -433,6 +473,7 @@ function renderTest(t: ReportTest): string {
       ${t.retries > 0 ? `<span class="tag tag-flaky">↻ ${t.retries}</span>` : ''}
       <span class="tag tag-device">${esc(t.device)}</span>
       ${stepN ? `<span class="tag tag-steps">${stepN} step${stepN === 1 ? '' : 's'}</span>` : ''}
+      ${t.usage && t.usage.totalTokens > 0 ? `<span class="tag tag-cost" title="${esc(usageTooltip(t.usage))}">${esc(formatUsage(t.usage))}</span>` : ''}
       <span class="tag tag-time">${esc(fmtDur(t.durationMs))}</span>
     </span>
     <span class="chevron">›</span>
@@ -468,6 +509,14 @@ interface ClientStep {
    * already live in the screenshot's pixel space).
    */
   tap?: { x: number; y: number; w?: number; h?: number };
+  /** Pre-formatted per-step LLM cost ("$0.0003"), present only when tokens were spent. */
+  cost?: string;
+  /** Pre-formatted per-step token count ("1.2k"), present only when tokens were spent. */
+  tokens?: string;
+  /** Tooltip breaking the step cost down by text/vision model. */
+  costTitle?: string;
+  /** True when the locator cache served this step (no DOM parse / LLM call). */
+  cacheHit?: boolean;
 }
 interface ClientHook {
   kind: string;
@@ -534,6 +583,16 @@ function buildData(tests: ReportTest[]): ClientTest[] {
             h: s.deviceScreenSize?.height ?? s.screenshotSize?.height,
           }
         : undefined,
+      // Per-step cost: only when the step actually spent tokens (an LLM/vision
+      // call). Deterministic regex/DOM steps and cache hits carry no usage.
+      ...(s.usage && s.usage.totalTokens > 0
+        ? {
+            cost: formatCost(s.usage.cost),
+            tokens: formatTokens(s.usage.totalTokens),
+            costTitle: usageTooltip(s.usage),
+          }
+        : {}),
+      cacheHit: s.cacheHit,
     })),
   }));
 }
@@ -907,7 +966,12 @@ body.light .hook-err{color:#7a1a2a}
 .dt-step.s-failed .dt-step-n{color:var(--fail);border-color:rgba(255,107,129,.5)}
 .dt-step-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
 .dt-step-desc{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
-.dt-step-kind{font-family:"JetBrains Mono",monospace;font-size:11px;text-transform:uppercase;color:var(--faint);margin-top:2px}
+.dt-step-sub{display:flex;align-items:center;gap:7px;margin-top:2px;flex-wrap:wrap}
+.dt-step-kind{font-family:"JetBrains Mono",monospace;font-size:11px;text-transform:uppercase;color:var(--faint)}
+.dt-step-badge{font-family:"JetBrains Mono",monospace;font-size:10.5px;padding:1px 6px;border-radius:5px;border:1px solid var(--line);line-height:1.5;white-space:nowrap}
+.dt-step-badge.dt-cost{color:var(--flaky);border-color:rgba(240,180,41,.35)}
+.dt-step-badge.dt-cache{color:var(--brand);border-color:rgba(var(--brand-rgb),.35);background:var(--brand-soft)}
+.dt-cache-pill{color:var(--brand);border-color:rgba(var(--brand-rgb),.4)}
 .dt-step-time{font-family:"JetBrains Mono",monospace;font-size:12px;color:var(--faint);flex-shrink:0}
 
 .dt-stage{display:flex;justify-content:center;padding:8px}
@@ -978,6 +1042,14 @@ function toggleTheme(){applyTheme(document.body.classList.contains('light')?'dar
 function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 function fmt(ms){if(!ms)return'0s';if(ms<1000)return ms+'ms';var s=ms/1000;return s<60?s.toFixed(1)+'s':Math.floor(s/60)+'m '+Math.round(s%60)+'s';}
 function glyph(s){return s==='passed'?'✓':s==='failed'?'✗':'⊘';}
+// Per-step badges shown under the step label: a cache-hit chip (locator cache
+// served the element — no DOM parse or LLM call) and/or an LLM cost chip.
+function stepBadges(s){
+  var out='';
+  if(s.cacheHit) out+='<span class="dt-step-badge dt-cache" title="Element served from the locator cache — no DOM parse or LLM call">⚡ cache</span>';
+  if(s.cost) out+='<span class="dt-step-badge dt-cost" title="'+esc(s.costTitle||'')+'">'+esc(s.cost)+'</span>';
+  return out;
+}
 
 // ── list: filter + search + device ──
 var filter='all', q='', deviceFilter='';
@@ -1073,7 +1145,8 @@ function renderDetail(t){
   var steps=t.steps.length
     ? t.steps.map(function(s,i){return '<button class="dt-step s-'+s.status+'" data-i="'+i+'" onclick="selectStep('+i+')">'+
         '<span class="dt-step-n">'+s.n+'</span>'+
-        '<span class="dt-step-main"><span class="dt-step-desc">'+esc(s.desc)+'</span><span class="dt-step-kind">'+esc(s.kind)+'</span></span>'+
+        '<span class="dt-step-main"><span class="dt-step-desc">'+esc(s.desc)+'</span>'+
+          '<span class="dt-step-sub"><span class="dt-step-kind">'+esc(s.kind)+'</span>'+stepBadges(s)+'</span></span>'+
         '<span class="dt-step-time">'+fmt(s.durationMs)+'</span></button>';}).join('')
     : '<div class="dt-noshot" style="padding:28px">No captured steps</div>';
   var hooksBody=renderHooksTab(t);
@@ -1197,6 +1270,12 @@ function renderInspector(s){
   rows.push(['Action',esc(s.kind),'mono']);
   if(s.phase)rows.push(['Phase',esc(s.phase),'mono']);
   rows.push(['Duration',fmt(s.durationMs),'mono']);
+  // LLM cost for this step, or an explicit "cache hit / free" note so a blank
+  // cost never reads as missing data.
+  if(s.cost)rows.push(['LLM cost','<div class="insp-val mono" title="'+esc(s.costTitle||'')+'">'+esc(s.tokens)+' tok · '+esc(s.cost)+'</div>','raw']);
+  else if(s.cacheHit)rows.push(['LLM cost','<div class="insp-val mono faint">$0 · locator cache hit</div>','raw']);
+  else rows.push(['LLM cost','<div class="insp-val mono faint">$0 · no model call</div>','raw']);
+  if(s.cacheHit)rows.push(['Locator','<span class="insp-pill dt-cache-pill">⚡ cache hit</span>','raw']);
   if(s.message)rows.push(['Message',esc(s.message),'']);
   if(s.tap)rows.push(['Tap point','['+s.tap.x+', '+s.tap.y+']','mono']);
   document.getElementById('dt-insp').innerHTML=rows.map(function(r){

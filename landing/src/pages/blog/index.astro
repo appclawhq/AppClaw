@@ -1,0 +1,76 @@
+---
+import { getCollection } from "astro:content";
+import BlogLayout from "../../layouts/BlogLayout.astro";
+
+const CAT_LABEL: Record<string, string> = {
+  product: "Product",
+  engineering: "Engineering",
+  "field-notes": "Field notes",
+};
+
+const posts = (await getCollection("blog"))
+  .filter((p) => !p.data.draft)
+  .sort((a, b) => b.data.date.valueOf() - a.data.date.valueOf());
+
+const fmt = (d: Date) =>
+  d.toLocaleDateString("en-US", { month: "short", day: "2-digit", year: "numeric" });
+
+// distinct categories present, in a stable order
+const order = ["product", "engineering", "field-notes"];
+const cats = order.filter((c) => posts.some((p) => p.data.category === c));
+---
+
+<BlogLayout
+  title="Blog · AppClaw"
+  description="Writing on AppClaw and the shift to AI agents in mobile testing: how the agent perceives a screen, when to reach for YAML, and where AI-driven QA is heading."
+>
+  <!-- HERO -->
+  <section class="blog-hero">
+    <span class="eyebrow rv in">The logbook</span>
+    <h1 class="rv in d1">Notes on agents that <span class="ac">tap, type,<br />and swipe</span>.</h1>
+    <p class="lead rv in d2">
+      What we're learning building AppClaw, and where AI is taking mobile testing,
+      from how the agent reads a screen to when a plain-English test beats a brittle selector.
+    </p>
+
+    {cats.length > 0 && (
+      <div class="cats rv in d2">
+        {cats.map((c) => (
+          <span class={`cat-chip ${c === "engineering" ? "acc-amber" : c === "field-notes" ? "acc-indigo" : "acc-emerald"}`}>
+            <span class="sw"></span>{CAT_LABEL[c]}
+          </span>
+        ))}
+      </div>
+    )}
+    <div class="rule"></div>
+  </section>
+
+  <!-- LIST -->
+  <section style="padding-bottom:20px">
+    {posts.length === 0 ? (
+      <div class="blog-empty">
+        <b>No posts yet.</b> Drop a markdown file in <code>src/content/blog/</code> and it appears here.
+      </div>
+    ) : (
+      <div class="log">
+        {posts.map((p) => (
+          <article class={`log-row rv ${p.data.category === "engineering" ? "acc-amber" : p.data.category === "field-notes" ? "acc-indigo" : "acc-emerald"}`}>
+            <div class="stamp">
+              {fmt(p.data.date)}
+              <span class="cat">{CAT_LABEL[p.data.category]}</span>
+            </div>
+            <div class="body">
+              <h3>{p.data.title}</h3>
+              <p>{p.data.description}</p>
+              {p.data.tags.length > 0 && (
+                <div class="tags">{p.data.tags.map((t) => <span>{t}</span>)}</div>
+              )}
+            </div>
+            <div class="go">read →</div>
+            <a class="cover" href={`/blog/${p.id}`} aria-label={p.data.title}></a>
+          </article>
+        ))}
+      </div>
+    )}
+  </section>
+</BlogLayout>
