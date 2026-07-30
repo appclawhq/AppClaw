@@ -7,6 +7,7 @@
  * For real devices, provides guidance on WDA signing requirements.
  */
 
+import { createInterface } from 'node:readline';
 import type { MCPClient } from '../mcp/types.js';
 import { extractText } from '../mcp/tools.js';
 import * as ui from '../ui/terminal.js';
@@ -117,8 +118,7 @@ export async function checkRealDeviceWDA(): Promise<void> {
 
   // Ask user to confirm
   return new Promise((resolve) => {
-    const readline = require('node:readline');
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
 
     rl.question('  Continue (WDA already installed)? [Y/n] ', (answer: string) => {
       rl.close();
