@@ -17,7 +17,8 @@ function shortTypeName(xcuiType: string): string {
 
 /** Check if an iOS element type is typically editable */
 function isEditableType(typeName: string): boolean {
-  const editableTypes = ['TextField', 'SecureTextField', 'TextEditor', 'SearchField'];
+  // XCUITest exposes UIKit/RN multiline inputs (including KRN composers) as TextView.
+  const editableTypes = ['TextField', 'TextView', 'SecureTextField', 'TextEditor', 'SearchField'];
   return editableTypes.some((t) => typeName.includes(t));
 }
 
