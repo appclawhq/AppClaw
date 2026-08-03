@@ -19,6 +19,19 @@ const proximitySchema = z
       .enum(['above', 'below', 'toLeftOf', 'toRightOf', 'near', 'within'])
       .describe('Spatial relation of the target element to the anchor'),
     anchor: z.string().describe('Label/text of the reference element the target is positioned by'),
+    anchorProximity: z
+      .object({
+        relation: z
+          .enum(['above', 'below', 'toLeftOf', 'toRightOf', 'near', 'within'])
+          .describe('Spatial relation of the anchor to ITS reference element'),
+        anchor: z.string().describe('Label/text of the element the anchor is positioned by'),
+      })
+      .optional()
+      .describe(
+        'Chained qualifier picking WHICH anchor when several match, e.g. ' +
+          '"to the left of NSEFO which is near 0.04" → anchor "NSEFO", ' +
+          'anchorProximity {relation: "near", anchor: "0.04"}'
+      ),
   })
   .optional()
   .describe('Only when the instruction positions the target relative to another element');
@@ -117,6 +130,8 @@ const SYSTEM_PROMPT =
   `"the field inside the form"), set proximity={relation, anchor}: relation is one of ` +
   `above|below|toLeftOf|toRightOf|near|within, anchor is the reference element's label. ` +
   `Put only the target's own label in label/target — not the relation or anchor. ` +
+  `When the anchor is itself positioned ("to the left of NSEFO which is near 0.04"), ` +
+  `nest the second relation in proximity.anchorProximity={relation, anchor}. ` +
   `Omit proximity entirely when there is no relative positioning.\n` +
   `Extract the relevant parameters. Works with any language.`;
 

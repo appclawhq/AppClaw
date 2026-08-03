@@ -23,8 +23,10 @@ const PROXIMITY_RELATIONS: Record<string, ProximityRelation> = {
   underneath: 'below',
   'left of': 'toLeftOf',
   'to the left of': 'toLeftOf',
+  'to the left to': 'toLeftOf', // common preposition slip for "of"
   'right of': 'toRightOf',
   'to the right of': 'toRightOf',
+  'to the right to': 'toRightOf', // common preposition slip for "of"
   near: 'near',
   beside: 'near',
   'next to': 'near',
@@ -45,16 +47,31 @@ const PROXIMITY_RE = new RegExp(`^(.+?)\\s+(${RELATION_ALT})\\s+(?:the\\s+)?(.+)
  * Proximity qualifier. e.g. "login button below password field" →
  * { label: "login button", proximity: { relation: 'below', anchor: 'password field' } }.
  * Returns just the label unchanged when no relation phrase is present.
+ *
+ * The anchor phrase may itself carry a chained qualifier picking WHICH anchor:
+ * "YESBANK to the left of NSEFO which is near ₹0.04" (or without the "which is"
+ * connector) nests as proximity.anchorProximity.
  */
 export function splitProximity(label: string): { label: string; proximity?: Proximity } {
   const m = label.match(PROXIMITY_RE);
   if (!m) return { label };
-  const target = trimPunct(m[1].trim());
+  // A trailing connector on the target means the relation opens a qualifier
+  // clause: "YESBANK which is to the left of BSE" → target "YESBANK".
+  const target = trimPunct(m[1].trim()).replace(/\s+(?:which|that)\s+is$/i, '');
   const relWord = m[2].toLowerCase().replace(/\s+/g, ' ');
-  const anchor = trimPunct(m[3].trim());
+  const anchorRest = trimPunct(m[3].trim());
   const relation = PROXIMITY_RELATIONS[relWord];
-  if (!relation || !target || !anchor) return { label };
-  return { label: target, proximity: { relation, anchor } };
+  if (!relation || !target || !anchorRest) return { label };
+  // Recurse on the anchor phrase (dropping an optional "which is"/"that is"
+  // connector) so a qualified anchor nests instead of being matched literally.
+  const nested = splitProximity(anchorRest.replace(/\s+(?:which|that)\s+is\s+/i, ' '));
+  if (nested.proximity && nested.label) {
+    return {
+      label: target,
+      proximity: { relation, anchor: nested.label, anchorProximity: nested.proximity },
+    };
+  }
+  return { label: target, proximity: { relation, anchor: anchorRest } };
 }
 
 /** Build a tap step, peeling off any trailing proximity qualifier. */
