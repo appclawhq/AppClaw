@@ -19,7 +19,8 @@ on:
         default: ''
   pull_request:
     paths:
-      - 'src/runner/**'
+      - 'packages/runner/**'
+      - 'packages/core/src/flow/parallel-runner.ts'
       - 'examples/runner/**'
       - '.github/workflows/runner-e2e.yml'
 
