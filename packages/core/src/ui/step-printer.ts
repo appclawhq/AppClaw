@@ -27,6 +27,8 @@ export function stepAction(step: FlowStep): string {
       return 'close';
     case 'tap':
       return 'tap';
+    case 'doubleTap':
+      return 'doubletap';
     case 'longPress':
       return 'longpress';
     case 'type':
@@ -68,6 +70,8 @@ export function stepTarget(step: FlowStep): string {
     case 'closeApp':
       return step.query ?? 'current app';
     case 'tap':
+      return `"${step.label}"`;
+    case 'doubleTap':
       return `"${step.label}"`;
     case 'longPress':
       return `"${step.label}"${step.duration != null ? ` (${step.duration}ms)` : ''}`;

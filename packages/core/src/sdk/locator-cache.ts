@@ -29,7 +29,14 @@ const DEAD_THRESHOLD = 0.05;
 
 export type LocatorStrategy = 'accessibility id' | 'id' | 'xpath';
 
-export type LocatorActionKind = 'tap' | 'type' | 'longPress' | 'swipe' | 'drag' | 'scrollAssert';
+export type LocatorActionKind =
+  | 'tap'
+  | 'doubleTap'
+  | 'type'
+  | 'longPress'
+  | 'swipe'
+  | 'drag'
+  | 'scrollAssert';
 
 export interface LocatorCacheEntry {
   id: string;

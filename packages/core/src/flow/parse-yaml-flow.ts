@@ -206,6 +206,7 @@ export function normalizeStructured(raw: unknown, index: number): FlowStep | nul
       );
     }
     if (k === 'tap') return { kind: 'tap', label: String(v) };
+    if (k === 'doubleTap' || k === 'double_tap') return { kind: 'doubleTap', label: String(v) };
     if (k === 'zoom') {
       const scale = Number(v);
       if (!Number.isFinite(scale) || scale <= 0) {

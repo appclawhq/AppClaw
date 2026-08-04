@@ -92,6 +92,8 @@ function spinnerDetail(step: FlowStep): string {
   switch (step.kind) {
     case 'tap':
       return 'tapping the screen…';
+    case 'doubleTap':
+      return 'double-tapping the screen…';
     case 'longPress':
       return 'long-pressing the screen…';
     case 'type':
@@ -130,6 +132,7 @@ function spinnerDetail(step: FlowStep): string {
 // Action glyph per step kind — mirrors the Ink StepLine look.
 const KIND_ICON: Record<string, string> = {
   tap: '●',
+  doubleTap: '●',
   longPress: '●',
   type: '⊞',
   swipe: '↕',
@@ -217,6 +220,8 @@ function stepToYaml(step: FlowStep): unknown {
       return `open ${step.query} app`;
     case 'tap':
       return `tap ${step.label}`;
+    case 'doubleTap':
+      return `double tap ${step.label}`;
     case 'longPress':
       return step.duration != null
         ? `long press ${step.label} for ${step.duration}ms`

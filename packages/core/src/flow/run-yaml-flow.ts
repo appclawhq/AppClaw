@@ -301,6 +301,8 @@ function stepLabel(step: FlowStep): string {
       return `wait until "${step.text}" is visible (${step.timeoutSeconds}s timeout)`;
     case 'tap':
       return `tap "${step.label}"`;
+    case 'doubleTap':
+      return `double-tap "${step.label}"`;
     case 'longPress':
       return `long-press "${step.label}"${step.duration != null ? ` (${step.duration}ms)` : ''}`;
     case 'type':
@@ -971,27 +973,69 @@ async function tryCachedLocator(
   return null;
 }
 
+/**
+ * The tap-family gestures share one resolution pipeline (implicit wait, vision
+ * fallback, proximity/compound, locator cache) and differ only in the
+ * appium-mcp gesture fired at the end.
+ */
+type TapGesture = 'tap' | 'double_tap';
+
+/** Past-tense verb for success messages: "Tapped" / "Double-tapped". */
+function gestureVerb(gesture: TapGesture): string {
+  return gesture === 'double_tap' ? 'Double-tapped' : 'Tapped';
+}
+
+/** Cache action kind for a tap-family gesture — distinct so entries never mix. */
+function gestureCacheKind(gesture: TapGesture): 'tap' | 'doubleTap' {
+  return gesture === 'double_tap' ? 'doubleTap' : 'tap';
+}
+
+/** Fire a tap-family gesture at raw coordinates. `tap` keeps its W3C fallback. */
+async function gestureAtCoordinates(
+  mcp: MCPClient,
+  x: number,
+  y: number,
+  gesture: TapGesture
+): Promise<boolean> {
+  if (gesture === 'tap') return tapAtCoordinates(mcp, x, y);
+  try {
+    const result = await mcp.callTool('appium_gesture', {
+      action: 'double_tap',
+      x: Math.round(x),
+      y: Math.round(y),
+    });
+    const text = result.content?.map((c: any) => (c.type === 'text' ? c.text : '')).join('') ?? '';
+    return !text.toLowerCase().includes('error') && !text.toLowerCase().includes('failed');
+  } catch {
+    return false;
+  }
+}
+
 /** Try to tap an element using vision locate. Returns null if vision can't find it. */
-async function tryTapByVision(mcp: MCPClient, label: string): Promise<ActionResult | null> {
+async function tryTapByVision(
+  mcp: MCPClient,
+  label: string,
+  gesture: TapGesture = 'tap'
+): Promise<ActionResult | null> {
   const uuid = await findByVision(mcp, `UI element labeled or showing "${label}"`);
   if (!uuid) return null;
 
   if (isAIElement(uuid)) {
     const coords = parseAIElementCoords(uuid);
     if (coords) {
-      const tapped = await tapAtCoordinates(mcp, coords.x, coords.y);
+      const tapped = await gestureAtCoordinates(mcp, coords.x, coords.y, gesture);
       if (tapped) {
         return {
           success: true,
-          message: `Tapped "${label}" via vision at [${coords.x}, ${coords.y}]`,
+          message: `${gestureVerb(gesture)} "${label}" via vision at [${coords.x}, ${coords.y}]`,
         };
       }
     }
     return null;
   }
 
-  await mcp.callTool('appium_gesture', { action: 'tap', elementUUID: uuid });
-  return { success: true, message: `Tapped "${label}" via vision` };
+  await mcp.callTool('appium_gesture', { action: gesture, elementUUID: uuid });
+  return { success: true, message: `${gestureVerb(gesture)} "${label}" via vision` };
 }
 
 /** One DOM snapshot: find label and click. Returns null if no match / no UUID (caller may retry). */
@@ -1002,7 +1046,8 @@ type DomTapMiss = { noMatch: true; reason: string };
 async function tryTapByLabelOnDom(
   mcp: MCPClient,
   label: string,
-  proximity?: Proximity
+  proximity?: Proximity,
+  gesture: TapGesture = 'tap'
 ): Promise<ActionResult | DomTapMiss | null> {
   const cacheCtx = getActiveLocatorCache();
   const pageSource = cacheCtx
@@ -1015,13 +1060,16 @@ async function tryTapByLabelOnDom(
   // Spatially-qualified taps never use the cache: they resolve to the picked
   // element's coordinates (no locator to record), and replaying a stored
   // locator would bypass the positional disambiguation entirely.
-  const keyInfo = cacheCtx && !proximity ? buildCacheKey(cacheCtx, pageSource, 'tap', label) : null;
+  const keyInfo =
+    cacheCtx && !proximity
+      ? buildCacheKey(cacheCtx, pageSource, gestureCacheKind(gesture), label)
+      : null;
   if (cacheCtx && keyInfo) {
     const hit = await tryCachedLocator(cacheCtx, mcp, keyInfo, async (uuid) => {
       // Capture the settled tap surface before the gesture navigates away.
       const beforeScreenshot = await capturePreAction(mcp);
-      await mcp.callTool('appium_gesture', { action: 'tap', elementUUID: uuid });
-      return { success: true, message: `Tapped "${label}"`, beforeScreenshot };
+      await mcp.callTool('appium_gesture', { action: gesture, elementUUID: uuid });
+      return { success: true, message: `${gestureVerb(gesture)} "${label}"`, beforeScreenshot };
     });
     if (hit) return hit;
   }
@@ -1049,14 +1097,14 @@ async function tryTapByLabelOnDom(
   if (proximity || picked.coordinateOnly) {
     const beforeScreenshot = await capturePreAction(mcp);
     const [x, y] = pick.center;
-    const tapped = await tapAtCoordinates(mcp, x, y);
+    const tapped = await gestureAtCoordinates(mcp, x, y, gesture);
     if (!tapped) return null;
     const where = proximity
       ? ` (${relationPhrase(proximity.relation)} ${describeAnchor(proximity)})`
       : '';
     return {
       success: true,
-      message: `Tapped "${label}"${where} at [${x}, ${y}]`,
+      message: `${gestureVerb(gesture)} "${label}"${where} at [${x}, ${y}]`,
       beforeScreenshot,
     };
   }
@@ -1072,7 +1120,7 @@ async function tryTapByLabelOnDom(
   // gesture so the report shows the screen the tap happened ON — with the dot
   // on the target — not the page it navigates to.
   const beforeScreenshot = await capturePreAction(mcp);
-  await mcp.callTool('appium_gesture', { action: 'tap', elementUUID: resolved.uuid });
+  await mcp.callTool('appium_gesture', { action: gesture, elementUUID: resolved.uuid });
   const coords = pick.center;
   // Record the winning locator so the next run for the same label on the same
   // screen hits the cache fast-path above.
@@ -1086,7 +1134,7 @@ async function tryTapByLabelOnDom(
   }
   return {
     success: true,
-    message: `Tapped "${label}" at [${coords[0]}, ${coords[1]}]`,
+    message: `${gestureVerb(gesture)} "${label}" at [${coords[0]}, ${coords[1]}]`,
     beforeScreenshot,
   };
 }
@@ -1095,14 +1143,15 @@ async function tapByLabel(
   mcp: MCPClient,
   label: string,
   poll: FlowTapPollOptions,
-  proximity?: Proximity
+  proximity?: Proximity,
+  gesture: TapGesture = 'tap'
 ): Promise<ActionResult> {
   // ── Vision-first mode: skip DOM entirely ──
   // Poll the full budget so the element is implicitly waited for until it
   // renders (or the wait budget is exhausted) — no explicit `wait` needed.
   if (isVisionMode()) {
     for (let attempt = 0; attempt < poll.maxAttempts; attempt++) {
-      const visionTap = await tryTapByVision(mcp, label);
+      const visionTap = await tryTapByVision(mcp, label, gesture);
       if (visionTap) return visionTap;
       if (attempt + 1 < poll.maxAttempts) {
         ui.printAgentBullet(
@@ -1128,13 +1177,13 @@ async function tapByLabel(
   let triedVisionEarly = false;
   let lastMissReason: string | undefined;
   for (let attempt = 0; attempt < poll.maxAttempts; attempt++) {
-    const domTap = await tryTapByLabelOnDom(mcp, label, proximity);
+    const domTap = await tryTapByLabelOnDom(mcp, label, proximity, gesture);
     if (domTap && !('noMatch' in domTap)) return domTap;
     if (domTap) {
       lastMissReason = domTap.reason;
       if (!triedVisionEarly && visionOk) {
         triedVisionEarly = true;
-        const visionTap = await tryTapByVision(mcp, label);
+        const visionTap = await tryTapByVision(mcp, label, gesture);
         if (visionTap) return visionTap;
       }
     }
@@ -1152,7 +1201,7 @@ async function tapByLabel(
   // (the element may have only just rendered on the final DOM poll).
   if (visionOk) {
     ui.printAgentBullet(`"${label}" not found in page source, trying vision…`);
-    const visionTap = await tryTapByVision(mcp, label);
+    const visionTap = await tryTapByVision(mcp, label, gesture);
     if (visionTap) return visionTap;
   }
 
@@ -2032,6 +2081,8 @@ export async function executeStep(
       return waitUntilCondition(mcp, step.condition, step.text, step.timeoutSeconds, tapPoll);
     case 'tap':
       return tapByLabel(mcp, step.label, tapPoll, step.proximity);
+    case 'doubleTap':
+      return tapByLabel(mcp, step.label, tapPoll, step.proximity, 'double_tap');
     case 'longPress':
       return longPressByLabel(mcp, step.label, step.duration);
     case 'type':

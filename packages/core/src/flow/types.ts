@@ -89,6 +89,7 @@ export type FlowStep =
       timeoutSeconds: number;
     } & Verbatim)
   | ({ kind: 'tap'; label: string; proximity?: Proximity } & Verbatim)
+  | ({ kind: 'doubleTap'; label: string; proximity?: Proximity } & Verbatim)
   | ({ kind: 'longPress'; label: string; duration?: number } & Verbatim)
   | ({ kind: 'type'; text: string; target?: string; proximity?: Proximity } & Verbatim)
   | ({ kind: 'enter' } & Verbatim)

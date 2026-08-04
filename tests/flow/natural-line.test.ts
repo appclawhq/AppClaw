@@ -477,3 +477,28 @@ describe('natural-line: returns null for unrecognized', () => {
     expect(r === null || r.kind !== undefined).toBe(true);
   });
 });
+
+describe('natural-line: double tap', () => {
+  test('double tap X', () => {
+    expect(tryParseNaturalFlowLine('double tap Photo')).toMatchObject({
+      kind: 'doubleTap',
+      label: 'Photo',
+    });
+  });
+  test('double-click on the image', () => {
+    expect(tryParseNaturalFlowLine('double-click on the image')).toMatchObject({
+      kind: 'doubleTap',
+      label: 'image',
+    });
+  });
+  test('double tap carries a spatial qualifier', () => {
+    expect(tryParseNaturalFlowLine('double tap YESBANK to the left of BSE')).toMatchObject({
+      kind: 'doubleTap',
+      label: 'YESBANK',
+      proximity: { relation: 'toLeftOf', anchor: 'BSE' },
+    });
+  });
+  test('single tap is unaffected', () => {
+    expect(tryParseNaturalFlowLine('tap Photo')).toMatchObject({ kind: 'tap', label: 'Photo' });
+  });
+});

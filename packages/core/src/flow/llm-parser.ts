@@ -51,6 +51,11 @@ const stepSchema = z.discriminatedUnion('kind', [
     proximity: proximitySchema,
   }),
   z.object({
+    kind: z.literal('doubleTap'),
+    label: z.string().describe('Element label/text to double-tap'),
+    proximity: proximitySchema,
+  }),
+  z.object({
     kind: z.literal('longPress'),
     label: z.string().describe('Element label/text to long-press'),
     duration: z.number().optional().describe('Hold duration in ms, default 2000'),
@@ -110,6 +115,7 @@ const SYSTEM_PROMPT =
   `- "open/launch/start <app>" → openApp\n` +
   `- "close/terminate/quit/kill <app>" → closeApp (query = app name); "close the app" → closeApp with no query (closes current app)\n` +
   `- "click/tap/press/select <element>" → tap\n` +
+  `- "double tap/double-tap/double click <element>" → doubleTap\n` +
   `- "long press/long-press/press and hold <element>" → longPress\n` +
   `- "type/enter/input <text>" or "search for <text>" → type\n` +
   `- "wait for <element> to be visible/appear" → waitUntil (visible)\n` +

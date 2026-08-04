@@ -226,3 +226,30 @@ describe('runOneInstruction: spatially-qualified tap (playground/SDK path)', () 
     expect(taps[0].args).toHaveProperty('elementUUID');
   });
 });
+
+describe('runOneInstruction: double tap', () => {
+  function doubleTaps(): ToolCall[] {
+    return calls.filter((c) => c.name === 'appium_gesture' && c.args.action === 'double_tap');
+  }
+
+  test('"Double tap on YESBANK to the left of BSE" fires double_tap at row-2 coords', async () => {
+    const { step, result } = await runOneInstruction(
+      mockMcp(),
+      'Double tap on YESBANK to the left of BSE'
+    );
+    expect(step).toMatchObject({ kind: 'doubleTap', label: 'YESBANK' });
+    expect(result.success).toBe(true);
+    expect(result.message).toContain('Double-tapped');
+    expect(gestureTaps()).toHaveLength(0); // no single tap fired
+    expect(doubleTaps()).toHaveLength(1);
+    expect(doubleTaps()[0].args).toMatchObject({ x: 160, y: 680 });
+  });
+
+  test('plain "double tap YESBANK" double-taps by element UUID', async () => {
+    const { result } = await runOneInstruction(mockMcp(), 'double tap YESBANK');
+    expect(result.success).toBe(true);
+    expect(calls.some((c) => c.name === 'appium_find_element')).toBe(true);
+    expect(doubleTaps()).toHaveLength(1);
+    expect(doubleTaps()[0].args).toHaveProperty('elementUUID');
+  });
+});

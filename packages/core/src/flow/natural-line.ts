@@ -161,6 +161,17 @@ export function tryParseNaturalFlowLine(line: string): FlowStep | null {
       return { kind: 'longPress', label, ...(duration != null ? { duration } : {}), verbatim };
   }
 
+  // "double tap X" / "double-tap X" / "double click [on] X" — must run before
+  // the single-tap match so the "double" prefix isn't swallowed into the label.
+  const doubleTapMatch = t.match(/^double[\s-](?:tap|click|press)(?:\s+on)?\s+(?:the\s+)?(.+)$/i);
+  if (doubleTapMatch) {
+    const label = trimPunct(doubleTapMatch[1].trim());
+    if (label) {
+      const { label: bare, proximity } = splitProximity(label);
+      return { kind: 'doubleTap', label: bare, ...(proximity ? { proximity } : {}), verbatim };
+    }
+  }
+
   const clickMatch = t.match(/^(?:click|tap|select|choose|pick)(?:\s+on)?\s+(?:the\s+)?(.+)$/i);
   if (clickMatch) {
     const label = trimPunct(clickMatch[1].trim());
