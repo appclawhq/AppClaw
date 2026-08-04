@@ -30,8 +30,12 @@ on:
 jobs:
   dom:
     name: DOM route
-    # A bare "labeled" event only concerns the vision route — don't re-run dom.
-    if: github.event.action != 'labeled'
+    # A bare "labeled" event only concerns the vision route. Fork PRs cannot
+    # receive LLM_API_KEY, so do not invoke the secret-required workflow there.
+    if: >-
+      github.event.action != 'labeled' &&
+      (github.event_name != 'pull_request' ||
+       github.event.pull_request.head.repo.full_name == github.repository)
     concurrency:
       group: runner-e2e-dom-${{ github.ref }}
       cancel-in-progress: true
@@ -44,7 +48,10 @@ jobs:
 
   vision:
     name: Vision route (AI label)
-    if: github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'AI')
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      contains(github.event.pull_request.labels.*.name, 'AI')
     concurrency:
       group: runner-e2e-vision-${{ github.ref }}
       cancel-in-progress: true

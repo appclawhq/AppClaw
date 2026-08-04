@@ -25,7 +25,13 @@ jobs:
   android-flow:
     name: Android — YAML flow
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request' || (inputs.platform == 'android' && inputs.goal == '')
+    # Fork pull requests do not receive repository secrets. Keep the real
+    # device/LLM check for same-repository PRs and manual runs only.
+    if: >-
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.head.repo.full_name == github.repository) ||
+      (github.event_name == 'workflow_dispatch' &&
+       inputs.platform == 'android' && inputs.goal == '')
 
     steps:
       - uses: actions/checkout@v4
