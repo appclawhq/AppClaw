@@ -1,3 +1,15 @@
+## [2.0.2](https://github.com/appclawhq/AppClaw/compare/v2.0.1...v2.0.2) (2026-08-03)
+
+### Bug Fixes
+
+* overhaul spatial locator resolution for list-row screens ([#52](https://github.com/appclawhq/AppClaw/issues/52)) ([b442987](https://github.com/appclawhq/AppClaw/commit/b4429870029cca908ca512be40818823ee830253))
+
+## [2.0.1](https://github.com/appclawhq/AppClaw/compare/v2.0.0...v2.0.1) (2026-07-31)
+
+### Bug Fixes
+
+* detect iOS TextView as editable ([#51](https://github.com/appclawhq/AppClaw/issues/51)) ([7215eef](https://github.com/appclawhq/AppClaw/commit/7215eef711efaa30d69ec943ee5df09b5236ef98))
+
 ## [2.0.0](https://github.com/appclawhq/AppClaw/compare/v1.9.3...v2.0.0) (2026-07-09)
 
 ### ⚠ BREAKING CHANGES

@@ -65,8 +65,17 @@ export type ProximityRelation = 'above' | 'below' | 'toLeftOf' | 'toRightOf' | '
  * Optional spatial qualifier: "<target> below <anchor>", "<target> near <anchor>".
  * Both fields are set together — `relation` is the geometric relation and
  * `anchor` is the natural-language label of the reference element.
+ *
+ * `anchorProximity` chains a qualifier onto the ANCHOR itself, picking which
+ * of several matching anchors to use: "YESBANK to the left of NSEFO which is
+ * near ₹0.04" → { relation: 'toLeftOf', anchor: 'NSEFO',
+ * anchorProximity: { relation: 'near', anchor: '₹0.04' } }.
  */
-export type Proximity = { relation: ProximityRelation; anchor: string };
+export type Proximity = {
+  relation: ProximityRelation;
+  anchor: string;
+  anchorProximity?: Proximity;
+};
 
 export type FlowStep =
   | ({ kind: 'launchApp' } & Verbatim)

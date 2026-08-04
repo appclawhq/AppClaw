@@ -266,7 +266,8 @@ function walkIOS(node: any, result: TrimmedNode[], parentContext: string = ''): 
     const isFocused = node['@_hasFocus'] === 'true';
     const isSelected = node['@_selected'] === 'true';
 
-    const editableTypes = ['TextField', 'SecureTextField', 'TextEditor', 'SearchField'];
+    // XCUITest exposes UIKit/RN multiline inputs (including KRN composers) as TextView.
+    const editableTypes = ['TextField', 'TextView', 'SecureTextField', 'TextEditor', 'SearchField'];
     const editable = editableTypes.some((t) => tag.includes(t));
     const clickable =
       isAccessible ||

@@ -179,6 +179,34 @@ describe('natural-line: proximity', () => {
       expect(r.proximity).toEqual({ relation: 'below', anchor: 'header' });
     }
   });
+  test('chained qualifier with "which is" connector', () => {
+    const r = tryParseNaturalFlowLine('click on YESBANK to the left of NSEFO which is near ₹0.04');
+    expect(r?.kind).toBe('tap');
+    if (r?.kind === 'tap') {
+      expect(r.label).toBe('YESBANK');
+      expect(r.proximity).toEqual({
+        relation: 'toLeftOf',
+        anchor: 'NSEFO',
+        anchorProximity: { relation: 'near', anchor: '₹0.04' },
+      });
+    }
+  });
+  test('chained qualifier without connector', () => {
+    const r = tryParseNaturalFlowLine('tap YESBANK to the left of OPT near ₹2.90');
+    expect(r?.kind === 'tap' && r.proximity).toEqual({
+      relation: 'toLeftOf',
+      anchor: 'OPT',
+      anchorProximity: { relation: 'near', anchor: '₹2.90' },
+    });
+  });
+  test('connector on the target: "X which is below Y"', () => {
+    const r = tryParseNaturalFlowLine('tap YESBANK which is below the search bar');
+    expect(r?.kind === 'tap' && r.label).toBe('YESBANK');
+    expect(r?.kind === 'tap' && r.proximity).toEqual({
+      relation: 'below',
+      anchor: 'search bar',
+    });
+  });
   test('no false positive: plain tap', () => {
     const r = tryParseNaturalFlowLine('tap Settings');
     expect(r?.kind === 'tap' && r.proximity).toBeUndefined();

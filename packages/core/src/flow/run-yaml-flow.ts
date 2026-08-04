@@ -355,6 +355,9 @@ const ROLE_WORDS = new Set([
   'label',
   'cell',
   'row',
+  'badge',
+  'chip',
+  'tag',
 ]);
 
 /** Collapse case + separators so "LOG IN", "log-in" and "login" all compare equal. */
@@ -377,7 +380,11 @@ function stripRoleWord(needle: string): string {
 export function scoreTapMatch(el: UIElement, needle: string): number {
   if (el.enabled === false) return -1;
 
-  const fields = [el.text, el.hint ?? '', el.accessibilityId, el.id]
+  // An editable's `text` is its current VALUE (whatever was typed into it),
+  // not a label — "tap YESBANK" must never target the search box just because
+  // "YesBank" was typed there. Editables stay matchable via their real labels:
+  // hint, accessibility id (content-desc), and resource id.
+  const fields = [el.editable ? '' : el.text, el.hint ?? '', el.accessibilityId, el.id]
     .map(squashLabel)
     .filter((f) => f.length > 0);
   if (fields.length === 0) return -1;
@@ -396,7 +403,11 @@ export function scoreTapMatch(el: UIElement, needle: string): number {
         s = 0; // exact
       else if (n.length >= 2 && f.includes(n))
         s = 1; // needle inside field
-      else if (f.length >= 2 && n.includes(f)) s = 2; // field inside needle
+      // Field inside needle counts only when the field covers at least half of
+      // it. Without the floor, a garbled instruction that failed to parse as a
+      // spatial qualifier ("YESBANK to the righ to ₹2.02") silently degrades
+      // into a confident tap on ANY element whose text appears in the phrase.
+      else if (f.length >= 2 && f.length * 2 >= n.length && n.includes(f)) s = 2;
       if (s >= 0 && (best === -1 || s < best)) best = s;
     }
   }
@@ -536,13 +547,155 @@ function relationPhrase(r: ProximityRelation): string {
   }
 }
 
+/** Nearest same-row element to the right of `cur` (vertical overlap, left edge past
+ *  `cur`'s right edge minus half-height slack for badge padding), or null. */
+function nearestRightNeighbor(pool: UIElement[], cur: UIElement): UIElement | null {
+  const c = rectOf(cur);
+  const slack = (c.bottom - c.top) / 2;
+  let best: UIElement | null = null;
+  let bestLeft = Infinity;
+  for (const e of pool) {
+    if (e === cur) continue;
+    const r = rectOf(e);
+    if (r.top >= c.bottom || r.bottom <= c.top) continue; // no vertical overlap
+    if (r.left < c.right - slack) continue; // not to the right
+    if (r.left < bestLeft) {
+      bestLeft = r.left;
+      best = e;
+    }
+  }
+  return best;
+}
+
+/** Union rect of a group as a synthetic (non-DOM) element, for anchoring / coordinate taps. */
+function mergeElements(group: UIElement[]): UIElement {
+  const rects = group.map(rectOf);
+  const left = Math.min(...rects.map((r) => r.left));
+  const right = Math.max(...rects.map((r) => r.right));
+  const top = Math.min(...rects.map((r) => r.top));
+  const bottom = Math.max(...rects.map((r) => r.bottom));
+  return {
+    ...group[0],
+    id: '',
+    accessibilityId: '',
+    text: group.map((g) => g.text).join(' '),
+    bounds: '',
+    center: [Math.round((left + right) / 2), Math.round((top + bottom) / 2)],
+    size: [right - left, bottom - top],
+    clickable: group.some((g) => g.clickable),
+  };
+}
+
+/**
+ * Resolve a label that SPANS multiple adjacent elements — badge clusters like
+ * "NSE FO" + "OPT" for the label "NSEFO OPT". Starting from an element whose
+ * squashed text is a proper prefix of the squashed label, extend rightward
+ * through the nearest same-row neighbour whose text continues the phrase until
+ * it is fully consumed. Returns synthetic elements covering each matching
+ * group's union rect (no DOM identity — callers must anchor on them or tap
+ * their coordinates), in document order; empty when no adjacent run spells
+ * out the label.
+ */
+function resolveCompoundLabelElements(elements: UIElement[], label: string): UIElement[] {
+  const want = squashLabel(label);
+  if (!want) return [];
+  const labeled = elements.filter(
+    (e) => e.enabled !== false && !e.editable && squashLabel(e.text).length > 0
+  );
+  const clusters: UIElement[] = [];
+  for (const start of labeled) {
+    const first = squashLabel(start.text);
+    if (first.length >= want.length || !want.startsWith(first)) continue;
+    let remaining = want.slice(first.length);
+    const group = [start];
+    let cur = start;
+    while (remaining.length > 0) {
+      const next = nearestRightNeighbor(labeled, cur);
+      if (!next) break;
+      const sq = squashLabel(next.text);
+      if (!sq || !remaining.startsWith(sq)) break;
+      remaining = remaining.slice(sq.length);
+      group.push(next);
+      cur = next;
+    }
+    if (remaining.length === 0 && group.length > 1) clusters.push(mergeElements(group));
+  }
+  return clusters;
+}
+
+function resolveCompoundLabelElement(elements: UIElement[], label: string): UIElement | null {
+  return resolveCompoundLabelElements(elements, label)[0] ?? null;
+}
+
 /** Best textual match for an anchor label among parsed elements, or null. */
 function resolveAnchorElement(elements: UIElement[], anchorLabel: string): UIElement | null {
   const scored = elements
     .map((el) => ({ el, s: scoreTapMatch(el, anchorLabel) }))
     .filter((x) => x.s >= 0)
     .sort((a, b) => a.s - b.s);
-  return scored[0]?.el ?? null;
+  const best = scored[0];
+  // Exact match, or the whole anchor contained in one field, is trustworthy.
+  if (best && best.s <= 1) return best.el;
+  // Otherwise the anchor is only PARTIALLY present in any single element —
+  // trust it only when ADJACENT elements spell out the full phrase (badge
+  // clusters like "NSE FO" + "OPT" for "NSEFO OPT"). A fragment match is a
+  // guess: anchoring "NSEFO SAI" on the first "NSE FO" badge would tap a
+  // confidently wrong row, so fail and report the anchor as not found.
+  return resolveCompoundLabelElement(elements, anchorLabel);
+}
+
+/** ALL plausible anchor candidates for a label: every match in the best
+ *  single-element tier, or compound clusters. Same strictness as
+ *  resolveAnchorElement — fragment matches are guesses, not candidates. */
+function anchorCandidateElements(elements: UIElement[], anchorLabel: string): UIElement[] {
+  const scored = elements
+    .map((el) => ({ el, s: scoreTapMatch(el, anchorLabel) }))
+    .filter((x) => x.s >= 0)
+    .sort((a, b) => a.s - b.s);
+  if (scored.length > 0 && scored[0].s <= 1) {
+    const bestTier = scored[0].s;
+    return scored.filter((x) => x.s === bestTier).map((x) => x.el);
+  }
+  return resolveCompoundLabelElements(elements, anchorLabel);
+}
+
+/**
+ * Resolve a proximity's anchor element, honoring a chained qualifier:
+ * "NSEFO which is near ₹0.04" resolves the ₹0.04 element first, then picks
+ * the "NSEFO" candidate that best satisfies `near` relative to it.
+ */
+function resolveAnchor(elements: UIElement[], proximity: Proximity): UIElement | null {
+  const inner = proximity.anchorProximity;
+  if (!inner) return resolveAnchorElement(elements, proximity.anchor);
+  const innerAnchor = resolveAnchor(elements, inner);
+  if (!innerAnchor) return null;
+  const ranked = rankBySpatial(
+    anchorCandidateElements(elements, proximity.anchor),
+    innerAnchor,
+    inner.relation
+  );
+  return ranked[0] ?? null;
+}
+
+/**
+ * A failed tap whose label still contains direction-ish words most likely holds
+ * a MISSPELLED spatial qualifier ("YESBANK to the righ to ₹2.02") that the
+ * parser couldn't recognize, so the whole phrase became the label. Suggest the
+ * correct phrasing instead of leaving a bare "no match".
+ */
+function spatialTypoHint(label: string): string {
+  const directionish =
+    /\b(?:left|lef|right|righ|rigth|above|abov|below|belo|under|beneath|near|beside|inside|within|next)\b/i;
+  return directionish.test(label)
+    ? ' — if you meant a spatial qualifier, phrase it like "<target> to the right of <anchor>"'
+    : '';
+}
+
+/** Human-readable anchor phrase for messages: `"NSEFO" near "₹0.04"` or `"BSE"`. */
+function describeAnchor(p: Proximity): string {
+  return p.anchorProximity
+    ? `"${p.anchor}" ${relationPhrase(p.anchorProximity.relation)} ${describeAnchor(p.anchorProximity)}`
+    : `"${p.anchor}"`;
 }
 
 /**
@@ -558,7 +711,7 @@ export function resolveTapTarget(
   elements: UIElement[],
   label: string,
   proximity?: Proximity
-): { el: UIElement | null; reason?: string } {
+): { el: UIElement | null; reason?: string; coordinateOnly?: boolean } {
   const wantsClickable = trailingRoleWord(label) != null;
   const scored = elements
     .map((el) => ({ el, s: scoreTapMatch(el, label) }))
@@ -570,22 +723,39 @@ export function resolveTapTarget(
       return 0;
     });
 
+  // No single element carries the label, or only loosely (field ⊂ label): the
+  // label may SPAN adjacent elements (badge clusters like "NSE FO" + "OPT").
+  // The merged pick has no DOM identity, so it must be tapped by coordinates.
+  if (!proximity && (scored.length === 0 || scored[0].s >= 2)) {
+    const compound = resolveCompoundLabelElement(elements, label);
+    if (compound) return { el: compound, coordinateOnly: true };
+  }
+
   if (scored.length === 0) return { el: null, reason: `no element matches "${label}"` };
   if (!proximity) return { el: scored[0].el };
 
-  const anchorEl = resolveAnchorElement(elements, proximity.anchor);
-  if (!anchorEl) return { el: null, reason: `anchor "${proximity.anchor}" not found` };
+  const anchorEl = resolveAnchor(elements, proximity);
+  if (!anchorEl) return { el: null, reason: `anchor ${describeAnchor(proximity)} not found` };
 
-  // A spatial pick ranks purely by distance, so it must not consider stray text
-  // that merely contains the word (e.g. a help paragraph mentioning "login
-  // button") — those can sit closer to the anchor than the real control. Prefer
-  // clickable candidates whenever any exist before ranking by position.
+  // A spatial pick ranks purely by distance, so clickable candidates are tried
+  // first — stray text that merely contains the word (e.g. a help paragraph
+  // mentioning "login button") can sit closer to the anchor than the real
+  // control. But lists often expose the visible text on a NON-clickable
+  // TextView (the clickable row container carries no text of its own), so when
+  // no clickable candidate satisfies the relation, retry with the full textual
+  // pool — tapping the text element dispatches to its clickable ancestor.
   const candidateEls = scored.map((x) => x.el);
   const clickable = candidateEls.filter((e) => e.clickable);
-  const pool = clickable.length > 0 ? clickable : candidateEls;
-  const ranked = rankBySpatial(pool, anchorEl, proximity.relation);
+  const clickableRanked = rankBySpatial(clickable, anchorEl, proximity.relation);
+  const ranked =
+    clickableRanked.length > 0
+      ? clickableRanked
+      : rankBySpatial(candidateEls, anchorEl, proximity.relation);
   if (ranked.length === 0) {
-    return { el: null, reason: `no "${label}" ${relationPhrase(proximity.relation)} the anchor` };
+    return {
+      el: null,
+      reason: `${candidateEls.length} element(s) match "${label}" but none is ${relationPhrase(proximity.relation)} the anchor`,
+    };
   }
   return { el: ranked[0] };
 }
@@ -627,8 +797,9 @@ export function resolveEditableForTarget(
 
   // 3. Spatial qualifier narrows by relation to a named anchor.
   if (proximity) {
-    const anchorEl = resolveAnchorElement(elements, proximity.anchor);
-    if (!anchorEl) return { el: null, reason: `anchor "${proximity.anchor}" not found on screen` };
+    const anchorEl = resolveAnchor(elements, proximity);
+    if (!anchorEl)
+      return { el: null, reason: `anchor ${describeAnchor(proximity)} not found on screen` };
     const pool = candidates.length > 0 ? candidates : editables;
     const ranked = rankBySpatial(pool, anchorEl, proximity.relation);
     if (ranked.length === 0) {
@@ -825,11 +996,14 @@ async function tryTapByVision(mcp: MCPClient, label: string): Promise<ActionResu
 
 /** One DOM snapshot: find label and click. Returns null if no match / no UUID (caller may retry). */
 /** Returns: ActionResult on success, "no_match" if label not in DOM, null if matched but UUID failed */
+/** DOM tap miss — the label (or its spatial qualifier) didn't resolve; `reason` says which part. */
+type DomTapMiss = { noMatch: true; reason: string };
+
 async function tryTapByLabelOnDom(
   mcp: MCPClient,
   label: string,
   proximity?: Proximity
-): Promise<ActionResult | 'no_match' | null> {
+): Promise<ActionResult | DomTapMiss | null> {
   const cacheCtx = getActiveLocatorCache();
   const pageSource = cacheCtx
     ? await getStablePageSourceForLocatorCache(mcp)
@@ -837,11 +1011,11 @@ async function tryTapByLabelOnDom(
 
   // SDK locator cache fast-path: skip parse + score + multi-strategy probe when
   // we already know the (strategy, selector) that won for this label on this
-  // screen. On miss / stale, falls through to the existing path below. The cache
-  // label folds in the proximity qualifier so a plain "login" and a spatially
-  // qualified "login below password" never share a cached locator.
-  const cacheLabel = proximity ? `${label}|${proximity.relation}:${proximity.anchor}` : label;
-  const keyInfo = cacheCtx ? buildCacheKey(cacheCtx, pageSource, 'tap', cacheLabel) : null;
+  // screen. On miss / stale, falls through to the existing path below.
+  // Spatially-qualified taps never use the cache: they resolve to the picked
+  // element's coordinates (no locator to record), and replaying a stored
+  // locator would bypass the positional disambiguation entirely.
+  const keyInfo = cacheCtx && !proximity ? buildCacheKey(cacheCtx, pageSource, 'tap', label) : null;
   if (cacheCtx && keyInfo) {
     const hit = await tryCachedLocator(cacheCtx, mcp, keyInfo, async (uuid) => {
       // Capture the settled tap surface before the gesture navigates away.
@@ -857,11 +1031,35 @@ async function tryTapByLabelOnDom(
     platform === 'android' ? parseAndroidPageSource(pageSource) : parseIOSPageSource(pageSource);
 
   // Score textually (with the clickable nudge) and, when a proximity qualifier is
-  // present, narrow to clickable candidates and rank spatially. Any miss (no text
-  // match, anchor not found, no spatial survivor) becomes 'no_match' so the
-  // caller's poll loop keeps waiting — the screen may still be rendering.
-  const pick = resolveTapTarget(elements, label, proximity).el;
-  if (!pick) return 'no_match';
+  // present, rank spatially (clickable preferred, full pool fallback). Any miss
+  // (no text match, anchor not found, no spatial survivor) becomes a DomTapMiss
+  // so the caller's poll loop keeps waiting — the screen may still be rendering —
+  // and the final error can say which part failed.
+  const picked = resolveTapTarget(elements, label, proximity);
+  const pick = picked.el;
+  if (!pick) return { noMatch: true, reason: picked.reason ?? `no element matches "${label}"` };
+
+  // A spatial pick must tap the CHOSEN instance. Re-locating it by id/text
+  // would silently undo the disambiguation whenever the identifier is shared —
+  // list rows typically reuse the same resource-id AND text, so the xpath
+  // `(//*[@text='X'])[1]` lands on the FIRST instance, not the one the
+  // qualifier selected. The picked element's coordinates ARE the resolution,
+  // so tap them directly. Compound picks (label spanning adjacent elements)
+  // have no DOM identity at all, so they're coordinate taps too.
+  if (proximity || picked.coordinateOnly) {
+    const beforeScreenshot = await capturePreAction(mcp);
+    const [x, y] = pick.center;
+    const tapped = await tapAtCoordinates(mcp, x, y);
+    if (!tapped) return null;
+    const where = proximity
+      ? ` (${relationPhrase(proximity.relation)} ${describeAnchor(proximity)})`
+      : '';
+    return {
+      success: true,
+      message: `Tapped "${label}"${where} at [${x}, ${y}]`,
+      beforeScreenshot,
+    };
+  }
 
   const resolved = await findByIdStrategiesDetailed(
     mcp,
@@ -886,10 +1084,9 @@ async function tryTapByLabelOnDom(
     });
     cacheCtx.dirty = true;
   }
-  const where = proximity ? ` (${relationPhrase(proximity.relation)} "${proximity.anchor}")` : '';
   return {
     success: true,
-    message: `Tapped "${label}"${where} at [${coords[0]}, ${coords[1]}]`,
+    message: `Tapped "${label}" at [${coords[0]}, ${coords[1]}]`,
     beforeScreenshot,
   };
 }
@@ -929,16 +1126,20 @@ async function tapByLabel(
   // element the qualifier was meant to exclude.
   const visionOk = isVisionLocateEnabled() && !proximity;
   let triedVisionEarly = false;
+  let lastMissReason: string | undefined;
   for (let attempt = 0; attempt < poll.maxAttempts; attempt++) {
     const domTap = await tryTapByLabelOnDom(mcp, label, proximity);
-    if (domTap && domTap !== 'no_match') return domTap;
-    if (domTap === 'no_match' && !triedVisionEarly && visionOk) {
-      triedVisionEarly = true;
-      const visionTap = await tryTapByVision(mcp, label);
-      if (visionTap) return visionTap;
+    if (domTap && !('noMatch' in domTap)) return domTap;
+    if (domTap) {
+      lastMissReason = domTap.reason;
+      if (!triedVisionEarly && visionOk) {
+        triedVisionEarly = true;
+        const visionTap = await tryTapByVision(mcp, label);
+        if (visionTap) return visionTap;
+      }
     }
     if (attempt + 1 < poll.maxAttempts) {
-      const why = domTap === 'no_match' ? 'not in page source yet' : 'found but not yet tappable';
+      const why = domTap ? 'not in page source yet' : 'found but not yet tappable';
       ui.printAgentBullet(
         `auto-wait: "${label}" ${why} — re-reading page source ` +
           `(attempt ${attempt + 2}/${poll.maxAttempts}, every ${poll.intervalMs}ms)`
@@ -958,8 +1159,9 @@ async function tapByLabel(
   return {
     success: false,
     message: proximity
-      ? `No "${label}" found ${relationPhrase(proximity.relation)} "${proximity.anchor}" on screen`
-      : `No matching element for "${label}"`,
+      ? `No "${label}" found ${relationPhrase(proximity.relation)} ${describeAnchor(proximity)} on screen` +
+        (lastMissReason ? ` — ${lastMissReason}` : '')
+      : `No matching element for "${label}"${spatialTypoHint(label)}`,
   };
 }
 

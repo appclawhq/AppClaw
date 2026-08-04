@@ -197,6 +197,152 @@ describe('resolveTapTarget: WDIO login screen', () => {
   });
 });
 
+// Search-results list (Groww-style). The typed query sits in the search box —
+// a CLICKABLE EditText whose text exact-matches the row titles — while the row
+// titles themselves are non-clickable TextViews inside clickable containers
+// that carry no text. A hard clickable-only spatial pool collapses to the
+// full-width search box, which can never satisfy toLeftOf → the exact
+// "No YESBANK found to the left of BSE" regression.
+describe('resolveTapTarget: list rows with non-clickable text (Groww regression)', () => {
+  const searchBox = el('YesBank', [540, 230], [900, 130], { editable: true, clickable: true });
+  const row1Container = el('', [540, 520], [1080, 180], { clickable: true });
+  const row1Title = el('YESBANK', [160, 500], [220, 60]);
+  const row1Badge = el('NSE', [320, 500], [80, 50]);
+  const row2Container = el('', [540, 700], [1080, 180], { clickable: true });
+  const row2Title = el('YESBANK', [160, 680], [220, 60]);
+  const row2Badge = el('BSE', [320, 680], [80, 50]);
+  const row2Sub = el('Yes Bank Limited', [220, 740], [340, 50]);
+  const screen = [
+    searchBox,
+    row1Container,
+    row1Title,
+    row1Badge,
+    row2Container,
+    row2Title,
+    row2Badge,
+    row2Sub,
+  ];
+
+  test('"YESBANK toLeftOf BSE" → row-2 title, not the search box', () => {
+    const r = resolveTapTarget(screen, 'YESBANK', { relation: 'toLeftOf', anchor: 'BSE' });
+    expect(r.el).toBe(row2Title);
+  });
+  test('"YESBANK near BSE" → row-2 title — typed search text is a value, not a label', () => {
+    // `near` expands its radius until something matches, so a clickable-first
+    // pool holding only the search box would eventually "match" it. The search
+    // box must not be a candidate at all: its text is the typed query.
+    const r = resolveTapTarget(screen, 'YESBANK', { relation: 'near', anchor: 'BSE' });
+    expect(r.el).toBe(row2Title);
+  });
+  test('plain "YESBANK" no longer targets the search box holding the typed query', () => {
+    const r = resolveTapTarget(screen, 'YESBANK');
+    expect(r.el).not.toBe(searchBox);
+  });
+  test('long garbled phrase does not loose-match a short title', () => {
+    const r = resolveTapTarget(screen, 'YESBANK to the righ to ₹2.02');
+    expect(r.el).toBeNull();
+  });
+  test('vertical distance breaks the tie between identical row titles', () => {
+    const r = resolveTapTarget(screen, 'YESBANK', { relation: 'toLeftOf', anchor: 'NSE' });
+    expect(r.el).toBe(row1Title);
+  });
+  test('clickable match still wins over closer stray text when it satisfies the relation', () => {
+    const saveBtn = el('Save', [200, 500], [100, 60], { clickable: true });
+    const strayText = el('Save your work', [250, 500], [180, 60]); // closer to anchor by bbox
+    const cancel = el('Cancel', [600, 500], [100, 60], { clickable: true });
+    const r = resolveTapTarget([saveBtn, strayText, cancel], 'Save', {
+      relation: 'toLeftOf',
+      anchor: 'Cancel',
+    });
+    expect(r.el).toBe(saveBtn);
+  });
+  test('anchor missing → null + reason naming the anchor', () => {
+    const r = resolveTapTarget(screen, 'YESBANK', { relation: 'toLeftOf', anchor: 'NASDAQ' });
+    expect(r.el).toBeNull();
+    expect(r.reason).toMatch(/NASDAQ/);
+  });
+  test('matches exist but wrong side → null + reason saying so', () => {
+    const r = resolveTapTarget(screen, 'YESBANK', { relation: 'toRightOf', anchor: 'BSE' });
+    expect(r.el).toBeNull();
+    expect(r.reason).toMatch(/none is to the right of/i);
+  });
+});
+
+// Badge clusters: "NSE FO" and "OPT" are ADJACENT elements — no single element
+// carries the phrase "NSEFO OPT". The resolver must merge the same-row run of
+// elements whose concatenated text spells the label, instead of loosely
+// matching the first "NSE FO" badge (which sits in the wrong, FUT, row).
+describe('resolveTapTarget: compound labels spanning adjacent elements', () => {
+  const futTitle = el('YESBANK', [160, 930], [220, 60]);
+  const futBadge1 = el('NSE FO', [340, 930], [120, 50]);
+  const futBadge2 = el('FUT', [440, 930], [60, 50]);
+  const optTitle = el('YESBANK', [160, 1130], [220, 60]);
+  const optBadge1 = el('NSE FO', [340, 1130], [120, 50]);
+  const optBadge2 = el('OPT', [440, 1130], [60, 50]);
+  const cePrice = el('₹2.90', [925, 1130], [150, 50]);
+  const peTitle = el('YESBANK', [160, 1330], [220, 60]);
+  const peBadge1 = el('NSE FO', [340, 1330], [120, 50]);
+  const peBadge2 = el('OPT', [440, 1330], [60, 50]);
+  const pePrice = el('₹0.04', [925, 1330], [150, 50]);
+  const screen = [
+    futTitle,
+    futBadge1,
+    futBadge2,
+    optTitle,
+    optBadge1,
+    optBadge2,
+    cePrice,
+    peTitle,
+    peBadge1,
+    peBadge2,
+    pePrice,
+  ];
+
+  test('anchor "NSEFO OPT" merges the badge cluster → OPT-row title, not FUT-row', () => {
+    const r = resolveTapTarget(screen, 'YESBANK', { relation: 'toLeftOf', anchor: 'NSEFO OPT' });
+    expect(r.el).toBe(optTitle);
+  });
+  test('plain label "NSE FO OPT" resolves to the merged cluster, coordinate-only', () => {
+    const r = resolveTapTarget(screen, 'NSE FO OPT');
+    expect(r.coordinateOnly).toBe(true);
+    expect(r.el?.center).toEqual([375, 1130]);
+  });
+  test('single-element anchors are untouched by compound matching ("FUT")', () => {
+    const r = resolveTapTarget(screen, 'YESBANK', { relation: 'toLeftOf', anchor: 'FUT' });
+    expect(r.el).toBe(futTitle);
+  });
+  test('chained anchor: "NSEFO near ₹0.04" picks the PE-row badge → PE-row title', () => {
+    // Three identical "NSE FO" badges — the chained qualifier selects the one
+    // in the ₹0.04 row before the outer relation is applied.
+    const r = resolveTapTarget(screen, 'YESBANK', {
+      relation: 'toLeftOf',
+      anchor: 'NSEFO',
+      anchorProximity: { relation: 'near', anchor: '₹0.04' },
+    });
+    expect(r.el).toBe(peTitle);
+  });
+  test('fragment anchor ("NSEFO SAI") is not guessed → null with reason', () => {
+    // "NSE FO" is a fragment of the anchor, but "SAI" exists nowhere — the
+    // anchor must fail rather than silently resolve to the first "NSE FO".
+    const r = resolveTapTarget(screen, 'YESBANK', { relation: 'toLeftOf', anchor: 'NSEFO SAI' });
+    expect(r.el).toBeNull();
+    expect(r.reason).toMatch(/NSEFO SAI/);
+  });
+  test('anchor with a role-word suffix still resolves ("OPT badge")', () => {
+    const r = resolveTapTarget(screen, 'YESBANK', { relation: 'toLeftOf', anchor: 'OPT badge' });
+    expect(r.el).toBe(optTitle);
+  });
+  test('chained anchor unresolvable → null with the full chain in the reason', () => {
+    const r = resolveTapTarget(screen, 'YESBANK', {
+      relation: 'toLeftOf',
+      anchor: 'NSEFO',
+      anchorProximity: { relation: 'near', anchor: '₹9.99' },
+    });
+    expect(r.el).toBeNull();
+    expect(r.reason).toMatch(/₹9\.99/);
+  });
+});
+
 describe('resolveEditableForTarget: iOS elements', () => {
   // Parser fills the same fields cross-platform; resolver is platform-agnostic.
   const f1 = el('', [400, 600], [700, 110], { hint: 'Email', editable: true, platform: 'ios' });
