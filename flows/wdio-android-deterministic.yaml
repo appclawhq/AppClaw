@@ -1,0 +1,12 @@
+appId: com.wdiodemoapp
+app: https://github.com/webdriverio/native-demo-app/releases/download/v2.2.0/android.wdio.native.app.v2.2.0.apk
+name: WDIO Android deterministic smoke
+platform: android
+---
+steps:
+  - launchApp
+  - waitUntil: Login
+  - tap: Login
+  - enter appclaw@gmail.com in input-email
+  - assert: input-email
+  - done

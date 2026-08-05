@@ -1,0 +1,34 @@
+name: Deterministic Mobile Tests
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  android:
+    name: Android — no LLM
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: AppiumTestDistribution/AppClaw@v1
+        with:
+          flow: flows/login.yaml
+          platform: android
+          strict: 'true'
+          agent-mode: dom
+          vision-mode: never
+
+  ios:
+    name: iOS — no LLM
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: AppiumTestDistribution/AppClaw@v1
+        with:
+          flow: flows/ios-login.yaml
+          platform: ios
+          strict: 'true'
+          agent-mode: dom
+          vision-mode: never

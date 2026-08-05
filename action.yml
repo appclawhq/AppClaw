@@ -14,6 +14,10 @@ inputs:
     description: 'Path to a YAML flow file (mutually exclusive with goal)'
     required: false
     default: ''
+  strict:
+    description: 'Fail when a YAML step cannot be parsed deterministically instead of using the LLM parser. Default: false'
+    required: false
+    default: 'false'
   goal:
     description: 'Natural language goal for the LLM agent (mutually exclusive with flow)'
     required: false
@@ -31,8 +35,9 @@ inputs:
     required: false
     default: 'gemini'
   api-key:
-    description: 'LLM API key — passed to AppClaw as LLM_API_KEY'
-    required: true
+    description: 'LLM API key — required for goals and non-deterministic flows; optional for strict DOM-only flows with vision-mode=never'
+    required: false
+    default: ''
   model:
     description: 'LLM model ID to use (e.g. gemini-2.0-flash, claude-3-5-haiku-20241022). Defaults to the provider built-in.'
     required: false
@@ -43,6 +48,10 @@ inputs:
     description: 'Interaction strategy: dom (element locators) or vision (screenshot AI)'
     required: false
     default: 'dom'
+  vision-mode:
+    description: 'Vision fallback policy: always, fallback, or never. Use never for deterministic no-LLM flows.'
+    required: false
+    default: 'fallback'
   max-steps:
     description: 'Maximum agent steps before the run is marked failed. Default: 30'
     required: false
@@ -165,29 +174,60 @@ runs:
     # ── Validate ──────────────────────────────────────────────────────────────
     - name: Validate inputs
       shell: bash
+      env:
+        INPUT_FLOW: ${{ inputs.flow }}
+        INPUT_GOAL: ${{ inputs.goal }}
+        INPUT_PLATFORM: ${{ inputs.platform }}
+        INPUT_STRICT: ${{ inputs.strict }}
+        INPUT_AGENT_MODE: ${{ inputs.agent-mode }}
+        INPUT_VISION_MODE: ${{ inputs.vision-mode }}
+        INPUT_API_KEY: ${{ inputs.api-key }}
+        INPUT_CLOUD_PROVIDER: ${{ inputs.cloud-provider }}
+        INPUT_LAMBDATEST_USERNAME: ${{ inputs.lambdatest-username }}
+        INPUT_LAMBDATEST_ACCESS_KEY: ${{ inputs.lambdatest-access-key }}
+        INPUT_LAMBDATEST_DEVICE_NAME: ${{ inputs.lambdatest-device-name }}
+        INPUT_LAMBDATEST_OS_VERSION: ${{ inputs.lambdatest-os-version }}
       run: |
-        if [ -z "${{ inputs.flow }}" ] && [ -z "${{ inputs.goal }}" ]; then
+        if [ -z "$INPUT_FLOW" ] && [ -z "$INPUT_GOAL" ]; then
           echo "::error title=Missing input::Provide either 'flow' (path to YAML) or 'goal' (natural language string)"
           exit 1
         fi
-        if [ -n "${{ inputs.flow }}" ] && [ -n "${{ inputs.goal }}" ]; then
+        if [ -n "$INPUT_FLOW" ] && [ -n "$INPUT_GOAL" ]; then
           echo "::error title=Conflicting inputs::Provide either 'flow' or 'goal', not both"
           exit 1
         fi
-        if [ "${{ inputs.platform }}" != "android" ] && [ "${{ inputs.platform }}" != "ios" ]; then
-          echo "::error title=Invalid platform::platform must be 'android' or 'ios', got '${{ inputs.platform }}'"
+        if [ "$INPUT_PLATFORM" != "android" ] && [ "$INPUT_PLATFORM" != "ios" ]; then
+          echo "::error title=Invalid platform::platform must be 'android' or 'ios', got '$INPUT_PLATFORM'"
           exit 1
         fi
-        if [ -n "${{ inputs.cloud-provider }}" ] && [ "${{ inputs.cloud-provider }}" != "lambdatest" ]; then
-          echo "::error title=Invalid cloud-provider::cloud-provider must be 'lambdatest' or empty, got '${{ inputs.cloud-provider }}'"
+        if [ "$INPUT_STRICT" != "true" ] && [ "$INPUT_STRICT" != "false" ]; then
+          echo "::error title=Invalid strict mode::strict must be 'true' or 'false', got '$INPUT_STRICT'"
           exit 1
         fi
-        if [ "${{ inputs.cloud-provider }}" = "lambdatest" ]; then
-          if [ -z "${{ inputs.lambdatest-username }}" ] || [ -z "${{ inputs.lambdatest-access-key }}" ]; then
+        if [ "$INPUT_AGENT_MODE" != "dom" ] && [ "$INPUT_AGENT_MODE" != "vision" ]; then
+          echo "::error title=Invalid agent mode::agent-mode must be 'dom' or 'vision', got '$INPUT_AGENT_MODE'"
+          exit 1
+        fi
+        if [ "$INPUT_VISION_MODE" != "always" ] && [ "$INPUT_VISION_MODE" != "fallback" ] && [ "$INPUT_VISION_MODE" != "never" ]; then
+          echo "::error title=Invalid vision mode::vision-mode must be 'always', 'fallback', or 'never', got '$INPUT_VISION_MODE'"
+          exit 1
+        fi
+        if [ -z "$INPUT_API_KEY" ]; then
+          if [ -n "$INPUT_GOAL" ] || [ "$INPUT_STRICT" != "true" ] || [ "$INPUT_AGENT_MODE" != "dom" ] || [ "$INPUT_VISION_MODE" != "never" ]; then
+            echo "::error title=Missing LLM API key::api-key may be omitted only for a flow with strict='true', agent-mode='dom', and vision-mode='never'"
+            exit 1
+          fi
+        fi
+        if [ -n "$INPUT_CLOUD_PROVIDER" ] && [ "$INPUT_CLOUD_PROVIDER" != "lambdatest" ]; then
+          echo "::error title=Invalid cloud-provider::cloud-provider must be 'lambdatest' or empty, got '$INPUT_CLOUD_PROVIDER'"
+          exit 1
+        fi
+        if [ "$INPUT_CLOUD_PROVIDER" = "lambdatest" ]; then
+          if [ -z "$INPUT_LAMBDATEST_USERNAME" ] || [ -z "$INPUT_LAMBDATEST_ACCESS_KEY" ]; then
             echo "::error title=Missing LambdaTest credentials::lambdatest-username and lambdatest-access-key are required when cloud-provider=lambdatest"
             exit 1
           fi
-          if [ -z "${{ inputs.lambdatest-device-name }}" ] || [ -z "${{ inputs.lambdatest-os-version }}" ]; then
+          if [ -z "$INPUT_LAMBDATEST_DEVICE_NAME" ] || [ -z "$INPUT_LAMBDATEST_OS_VERSION" ]; then
             echo "::error title=Missing device info::lambdatest-device-name and lambdatest-os-version are required when cloud-provider=lambdatest"
             exit 1
           fi
@@ -232,6 +272,7 @@ runs:
         LLM_MODEL: ${{ inputs.model }}
         LLM_THINKING: ${{ inputs.llm-thinking }}
         AGENT_MODE: ${{ inputs.agent-mode }}
+        VISION_MODE: ${{ inputs.vision-mode }}
         MAX_STEPS: ${{ inputs.max-steps }}
         STEP_DELAY: ${{ inputs.step-delay }}
         PLATFORM: ${{ inputs.platform }}
@@ -241,7 +282,10 @@ runs:
         LAMBDATEST_DEVICE_NAME: ${{ inputs.lambdatest-device-name }}
         LAMBDATEST_OS_VERSION: ${{ inputs.lambdatest-os-version }}
         LAMBDATEST_APP: ${{ inputs.lambdatest-app }}
-      run: appclaw --flow "${{ inputs.flow }}" --platform ${{ inputs.platform }}
+      run: |
+        args=(--flow "${{ inputs.flow }}" --platform "${{ inputs.platform }}")
+        if [ "${{ inputs.strict }}" = "true" ]; then args+=(--strict); fi
+        appclaw "${args[@]}"
 
     # ── LambdaTest — natural language goal ────────────────────────────────────
     - name: Run goal on LambdaTest
@@ -253,6 +297,7 @@ runs:
         LLM_MODEL: ${{ inputs.model }}
         LLM_THINKING: ${{ inputs.llm-thinking }}
         AGENT_MODE: ${{ inputs.agent-mode }}
+        VISION_MODE: ${{ inputs.vision-mode }}
         MAX_STEPS: ${{ inputs.max-steps }}
         STEP_DELAY: ${{ inputs.step-delay }}
         PLATFORM: ${{ inputs.platform }}
@@ -284,6 +329,7 @@ runs:
         LLM_MODEL: ${{ inputs.model }}
         LLM_THINKING: ${{ inputs.llm-thinking }}
         AGENT_MODE: ${{ inputs.agent-mode }}
+        VISION_MODE: ${{ inputs.vision-mode }}
         MAX_STEPS: ${{ inputs.max-steps }}
         STEP_DELAY: ${{ inputs.step-delay }}
         PLATFORM: android
@@ -294,7 +340,10 @@ runs:
         target: ${{ inputs.android-target }}
         emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
         disable-animations: true
-        script: appclaw --flow "${{ inputs.flow }}" --platform android
+        script: |
+          args=(--flow "${{ inputs.flow }}" --platform android)
+          if [ "${{ inputs.strict }}" = "true" ]; then args+=(--strict); fi
+          appclaw "${args[@]}"
 
     # ── Android — natural language goal ───────────────────────────────────────
     - name: Run goal on Android emulator
@@ -306,6 +355,7 @@ runs:
         LLM_MODEL: ${{ inputs.model }}
         LLM_THINKING: ${{ inputs.llm-thinking }}
         AGENT_MODE: ${{ inputs.agent-mode }}
+        VISION_MODE: ${{ inputs.vision-mode }}
         MAX_STEPS: ${{ inputs.max-steps }}
         STEP_DELAY: ${{ inputs.step-delay }}
         PLATFORM: android
@@ -410,6 +460,7 @@ runs:
         LLM_MODEL: ${{ inputs.model }}
         LLM_THINKING: ${{ inputs.llm-thinking }}
         AGENT_MODE: ${{ inputs.agent-mode }}
+        VISION_MODE: ${{ inputs.vision-mode }}
         MAX_STEPS: ${{ inputs.max-steps }}
         STEP_DELAY: ${{ inputs.step-delay }}
         PLATFORM: ios
@@ -417,7 +468,10 @@ runs:
         DEVICE_UDID: ${{ inputs.device-udid || env.IOS_SIMULATOR_UDID }}
         MCP_DEBUG: ${{ inputs.mcp-debug == 'true' && '1' || '0' }}
         MCP_TIMEOUT_MS: ${{ inputs.mcp-timeout-ms }}
-      run: appclaw --flow "${{ inputs.flow }}" --platform ios
+      run: |
+        args=(--flow "${{ inputs.flow }}" --platform ios)
+        if [ "${{ inputs.strict }}" = "true" ]; then args+=(--strict); fi
+        appclaw "${args[@]}"
 
     # ── iOS — natural language goal ───────────────────────────────────────────
     - name: Run goal on iOS simulator
@@ -429,6 +483,7 @@ runs:
         LLM_MODEL: ${{ inputs.model }}
         LLM_THINKING: ${{ inputs.llm-thinking }}
         AGENT_MODE: ${{ inputs.agent-mode }}
+        VISION_MODE: ${{ inputs.vision-mode }}
         MAX_STEPS: ${{ inputs.max-steps }}
         STEP_DELAY: ${{ inputs.step-delay }}
         PLATFORM: ios

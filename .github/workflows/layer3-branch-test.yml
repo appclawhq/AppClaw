@@ -20,8 +20,38 @@ on:
         options: [android, ios]
 
 jobs:
-  # ── Test 1: YAML flow on Android ────────────────────────────────────────────
-  # Runs on every PR (default) and on manual dispatch with android + no goal
+  # ── Test 1: Deterministic YAML flow on Android ──────────────────────────────
+  # Runs on every PR, including forks. Strict parsing plus DOM-only execution
+  # makes this a real device smoke test without repository secrets or LLM calls.
+  android-deterministic:
+    name: Android — deterministic YAML flow
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    if: >-
+      github.event_name == 'pull_request' ||
+      (github.event_name == 'workflow_dispatch' &&
+       inputs.platform == 'android' && inputs.goal == '')
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./
+        id: run
+        with:
+          use-local-build: 'true'
+          flow: flows/wdio-android-deterministic.yaml
+          platform: android
+          strict: 'true'
+          agent-mode: dom
+          vision-mode: never
+          report-name: layer3-android-deterministic-${{ github.run_id }}
+
+      - name: Show report path
+        if: always()
+        run: echo "Report → ${{ steps.run.outputs.report-path }}"
+
+  # ── Test 2: Vision YAML flow on Android ─────────────────────────────────────
+  # Runs on same-repository PRs and on manual dispatch with android + no goal
   android-flow:
     name: Android — YAML flow
     runs-on: ubuntu-latest
@@ -51,7 +81,7 @@ jobs:
         if: always()
         run: echo "Report → ${{ steps.run.outputs.report-path }}"
 
-  # ── Test 2: Natural language goal on Android ─────────────────────────────────
+  # ── Test 3: Natural language goal on Android ─────────────────────────────────
   # Runs only on manual dispatch with a goal specified
   android-goal:
     name: Android — natural language goal
@@ -76,12 +106,17 @@ jobs:
         if: always()
         run: echo "Report → ${{ steps.run.outputs.report-path }}"
 
-  # ── Test 3: YAML flow on iOS ─────────────────────────────────────────────────
-  # Runs only on manual dispatch with ios platform selected
-  ios-flow:
-    name: iOS — YAML flow
-    runs-on: macos-14
-    if: false
+  # ── Test 4: Deterministic YAML flow on iOS ───────────────────────────────────
+  # Runs on every PR, including forks, using the same strict DOM-only contract
+  # as Android. This protects simulator/WDA setup without requiring LLM secrets.
+  ios-deterministic:
+    name: iOS — deterministic YAML flow
+    runs-on: macos-15
+    timeout-minutes: 20
+    if: >-
+      github.event_name == 'pull_request' ||
+      (github.event_name == 'workflow_dispatch' &&
+       inputs.platform == 'ios' && inputs.goal == '')
 
     steps:
       - uses: actions/checkout@v4
@@ -90,14 +125,14 @@ jobs:
         id: run
         with:
           use-local-build: 'true'
-          flow: ${{ inputs.flow || 'flows/wdio.yaml' }}
+          flow: flows/wdio-ios-deterministic.yaml
           platform: ios
           ios-device-type: simulator
           mcp-debug: 'true'
-          provider: gemini
-          agent-mode: vision
-          api-key: ${{ secrets.LLM_API_KEY }}
-          report-name: layer3-ios-flow-${{ github.run_id }}
+          strict: 'true'
+          agent-mode: dom
+          vision-mode: never
+          report-name: layer3-ios-deterministic-${{ github.run_id }}
 
       - name: Show report path
         if: always()

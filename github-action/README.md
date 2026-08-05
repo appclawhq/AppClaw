@@ -9,6 +9,22 @@ Run [AppClaw](https://github.com/AppiumTestDistribution/AppClaw) mobile UI autom
 
 ## Quick start
 
+### Deterministic YAML flow — no LLM secret
+
+Use strict parsing, DOM-only interaction, and disable vision fallback together to guarantee that
+the Action cannot fall through to an LLM call. This configuration is safe for pull requests from
+forks because it does not require repository secrets.
+
+```yaml
+- uses: AppiumTestDistribution/AppClaw@v1
+  with:
+    flow: flows/login.yaml
+    platform: android # also supports ios on a macOS runner
+    strict: 'true'
+    agent-mode: dom
+    vision-mode: never
+```
+
 ### Android — run a YAML flow
 
 ```yaml
@@ -63,12 +79,14 @@ jobs:
 | Input                    | Required | Default              | Description                                                                    |
 | ------------------------ | :------: | -------------------- | ------------------------------------------------------------------------------ |
 | `flow`                   | one of¹  | —                    | Path to a YAML flow file relative to repo root                                 |
+| `strict`                 |    no    | `false`              | Fail on unrecognized YAML instead of using the LLM parser                      |
 | `goal`                   | one of¹  | —                    | Natural language goal executed by the LLM agent                                |
 | `platform`               |    no    | `android`            | Target platform: `android` or `ios`                                            |
 | `provider`               |    no    | `gemini`             | LLM provider: `gemini`, `anthropic`, `openai`, `groq`                          |
-| `api-key`                | **yes**  | —                    | LLM API key — stored as `LLM_API_KEY` in the environment                       |
+| `api-key`                |   no³    | —                    | LLM API key — stored as `LLM_API_KEY` in the environment                       |
 | `model`                  |    no    | _(provider default)_ | LLM model ID to pin (e.g. `gemini-2.0-flash`, `claude-3-5-haiku-20241022`)     |
 | `agent-mode`             |    no    | `dom`                | `dom` (element locators) or `vision` (screenshot AI)                           |
+| `vision-mode`            |    no    | `fallback`           | Vision policy: `always`, `fallback`, or `never`                                |
 | `max-steps`              |    no    | `30`                 | Maximum agent steps before the run fails                                       |
 | `step-delay`             |    no    | `500`                | Milliseconds between steps                                                     |
 | `android-api-level`      |    no    | `33`                 | Android emulator API level (33 = Android 13)                                   |
@@ -90,6 +108,8 @@ jobs:
 
 ¹ Provide either `flow` **or** `goal`, not both.
 ² Required when `cloud-provider: lambdatest`.
+³ Required for goals and non-deterministic flows. It may be omitted only when `strict: 'true'`,
+`agent-mode: dom`, and `vision-mode: never` are all set.
 
 ## Outputs
 
@@ -122,6 +142,9 @@ See the [AppClaw YAML flow docs](https://github.com/AppiumTestDistribution/AppCl
 ---
 
 ## Secrets setup
+
+Skip this section for a deterministic no-LLM flow configured with `strict: 'true'`,
+`agent-mode: dom`, and `vision-mode: never`.
 
 Go to your repo → **Settings → Secrets and variables → Actions → New repository secret**:
 

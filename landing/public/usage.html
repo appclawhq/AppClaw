@@ -4472,6 +4472,26 @@ console<span class="p">.</span>log<span class="p">(</span><span class="s">'All f
         <section id="gha-quick-start" class="reveal">
           <h2>Quick Start</h2>
 
+          <h3>Deterministic YAML flow — no LLM secret</h3>
+          <p>
+            Strict parsing, DOM-only interaction, and disabled vision fallback prevent automatic LLM
+            parsing and vision fallback. This configuration is safe for pull requests from forks and
+            needs no LLM secret.
+          </p>
+          <div class="code-block">
+            <div class="code-block-header">
+              <div class="code-block-dots"><span></span><span></span><span></span></div>
+              <span class="code-block-label">deterministic-flow.yml</span>
+            </div>
+            <pre>- <span class="k">uses:</span> <span class="s">AppiumTestDistribution/AppClaw@v1</span>
+  <span class="k">with:</span>
+    <span class="k">flow:</span> <span class="s">flows/login.yaml</span>
+    <span class="k">platform:</span> <span class="s">android</span>
+    <span class="k">strict:</span> <span class="s">'true'</span>
+    <span class="k">agent-mode:</span> <span class="s">dom</span>
+    <span class="k">vision-mode:</span> <span class="s">never</span></pre>
+          </div>
+
           <h3>Android — run a YAML flow</h3>
           <div class="code-block">
             <div class="code-block-header">
@@ -4548,6 +4568,12 @@ console<span class="p">.</span>log<span class="p">(</span><span class="s">'All f
                 <td>Path to a YAML flow file relative to repo root</td>
               </tr>
               <tr>
+                <td><code>strict</code></td>
+                <td>no</td>
+                <td><code>false</code></td>
+                <td>Fail on unrecognized YAML instead of using the LLM parser</td>
+              </tr>
+              <tr>
                 <td><code>goal</code></td>
                 <td>one of*</td>
                 <td>—</td>
@@ -4570,7 +4596,7 @@ console<span class="p">.</span>log<span class="p">(</span><span class="s">'All f
               </tr>
               <tr>
                 <td><code>api-key</code></td>
-                <td><strong>yes</strong></td>
+                <td>no***</td>
                 <td>—</td>
                 <td>LLM API key — stored as <code>LLM_API_KEY</code></td>
               </tr>
@@ -4585,6 +4611,14 @@ console<span class="p">.</span>log<span class="p">(</span><span class="s">'All f
                 <td>no</td>
                 <td><code>dom</code></td>
                 <td><code>dom</code> (element locators) or <code>vision</code> (screenshot AI)</td>
+              </tr>
+              <tr>
+                <td><code>vision-mode</code></td>
+                <td>no</td>
+                <td><code>fallback</code></td>
+                <td>
+                  Vision policy: <code>always</code>, <code>fallback</code>, or <code>never</code>
+                </td>
               </tr>
               <tr>
                 <td><code>max-steps</code></td>
@@ -4703,10 +4737,20 @@ console<span class="p">.</span>log<span class="p">(</span><span class="s">'All f
           </table>
           <p>* Provide either <code>flow</code> <strong>or</strong> <code>goal</code>, not both.</p>
           <p>** Required when <code>cloud-provider: lambdatest</code>.</p>
+          <p>
+            *** Required for goals and non-deterministic flows. It may be omitted only when
+            <code>strict: 'true'</code>, <code>agent-mode: dom</code>, and
+            <code>vision-mode: never</code> are all set.
+          </p>
         </section>
 
         <section id="gha-secrets" class="reveal">
           <h2>Secrets Setup</h2>
+          <p>
+            Skip LLM secret setup for a deterministic flow configured with
+            <code>strict: 'true'</code>, <code>agent-mode: dom</code>, and
+            <code>vision-mode: never</code>.
+          </p>
           <p>
             Go to your repo &rarr;
             <strong
