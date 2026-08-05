@@ -468,6 +468,7 @@ interface ClientStep {
    * already live in the screenshot's pixel space).
    */
   tap?: { x: number; y: number; w?: number; h?: number };
+  selectorDiagnostics?: StepArtifact['selectorDiagnostics'];
 }
 interface ClientHook {
   kind: string;
@@ -534,6 +535,7 @@ function buildData(tests: ReportTest[]): ClientTest[] {
             h: s.deviceScreenSize?.height ?? s.screenshotSize?.height,
           }
         : undefined,
+      selectorDiagnostics: s.selectorDiagnostics,
     })),
   }));
 }
@@ -1198,6 +1200,15 @@ function renderInspector(s){
   if(s.phase)rows.push(['Phase',esc(s.phase),'mono']);
   rows.push(['Duration',fmt(s.durationMs),'mono']);
   if(s.message)rows.push(['Message',esc(s.message),'']);
+  if(s.selectorDiagnostics){
+    var d=s.selectorDiagnostics;
+    rows.push(['Selector',esc(JSON.stringify(d.selector)),'mono']);
+    rows.push(['Matched',esc(String(d.matchedCount)),'mono']);
+    if(d.expectedProperties)rows.push(['Expected properties',esc(JSON.stringify(d.expectedProperties)),'mono']);
+    if(d.expectedCount!==undefined)rows.push(['Expected count',esc(JSON.stringify(d.expectedCount)),'mono']);
+    if(d.matched&&d.matched.length)rows.push(['Matched elements',esc(JSON.stringify(d.matched)),'mono']);
+    if(d.failures&&d.failures.length)rows.push(['Selector failures',esc(d.failures.join('; ')),'']);
+  }
   if(s.tap)rows.push(['Tap point','['+s.tap.x+', '+s.tap.y+']','mono']);
   document.getElementById('dt-insp').innerHTML=rows.map(function(r){
     var body=r[2]==='raw'?r[1]:'<div class="insp-val'+(r[2]==='mono'?' mono':'')+'">'+r[1]+'</div>';

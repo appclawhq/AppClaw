@@ -26,4 +26,6 @@ export interface ActionResult {
    * Undefined unless the report collector enabled capture.
    */
   beforeScreenshot?: string;
+  /** Deterministic selector resolution/assertion details for reports and CI diagnostics. */
+  selectorDiagnostics?: import('../flow/types.js').SelectorDiagnostics;
 }

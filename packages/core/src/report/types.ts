@@ -4,7 +4,7 @@
  * No database. Everything is stored as flat JSON files under `.appclaw/runs/`.
  */
 
-import type { FlowPhase, FlowMeta } from '../flow/types.js';
+import type { FlowPhase, FlowMeta, SelectorDiagnostics } from '../flow/types.js';
 
 /* ─── Per-step artifact ──────────────────────────────────── */
 
@@ -56,6 +56,8 @@ export interface StepArtifact {
    * follow-up if it proves useful enough to be a first-class badge.
    */
   cacheHit?: boolean;
+  /** Deterministic selector resolution and assertion details. */
+  selectorDiagnostics?: SelectorDiagnostics;
 }
 
 /* ─── Run manifest (per-run JSON) ────────────────────────── */

@@ -46,7 +46,7 @@ You'll need **Node.js 22+**, a connected device / emulator / simulator, and an *
 ## What it can do
 
 - **Agent mode** — plain-English goals; the LLM drives the device (tap, type, swipe)
-- **YAML flows** — deterministic, zero-LLM automation
+- **YAML flows** — deterministic, zero-LLM automation with [structured selectors and state assertions](docs/structured-selectors.md)
 - **Test runner** — vitest-style specs across real devices; scaffold with `appclaw init`
 - **SDK** — drive AppClaw from your own vitest / jest / mocha
 - **Playground, cloud devices, record & replay, PRD explorer**, and more

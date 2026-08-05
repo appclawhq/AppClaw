@@ -63,6 +63,10 @@ import type {
   PhaseResult,
   Proximity,
   ProximityRelation,
+  ElementSelector,
+  ElementPropertyExpectations,
+  NumericExpectation,
+  SelectorDiagnostics,
 } from './types.js';
 import type { AppResolver } from '../agent/app-resolver.js';
 import type { RunArtifactCollector } from '../report/writer.js';
@@ -78,6 +82,13 @@ import type { ScrollDistance } from '../sdk/types.js';
 import chalk from 'chalk';
 import * as ui from '../ui/terminal.js';
 import { resetVisionTokens, getVisionTokens } from '../vision/vision-token-tracker.js';
+import {
+  describeElementSelector,
+  evaluateStructuredAssertion,
+  resolveElementSelector,
+  snapshotElement,
+} from './selector.js';
+import { redactSensitiveData, redactSensitiveValues } from './variable-resolver.js';
 
 /** Extract [x, y] coordinates from an action result message like 'Tapped "X" via vision at [320, 540]' */
 function extractCoordinates(message?: string): { x: number; y: number } | undefined {
@@ -268,21 +279,7 @@ export interface RunYamlFlowResult {
   failedPhase?: FlowPhase;
 }
 
-/** Build the actual (non-redacted) label showing resolved values — for debug logging only. */
-function stepLabelResolved(step: FlowStep): string {
-  switch (step.kind) {
-    case 'type':
-      return `type "${step.text}"${step.target ? ` in "${step.target}"` : ''}`;
-    case 'assert':
-      return `assert "${step.text}"`;
-    case 'openApp':
-      return `open "${step.query}"`;
-    default:
-      return '';
-  }
-}
-
-function stepLabel(step: FlowStep): string {
+function rawStepLabel(step: FlowStep): string {
   if (step.verbatim) return step.verbatim;
   switch (step.kind) {
     case 'launchApp':
@@ -296,6 +293,8 @@ function stepLabel(step: FlowStep): string {
     case 'waitUntil':
       if (step.condition === 'screenLoaded')
         return `wait until screen is loaded (${step.timeoutSeconds}s timeout)`;
+      if (step.selector)
+        return `wait until selector(${describeElementSelector(step.selector)}) is ${step.condition === 'gone' ? 'gone' : 'visible'} (${step.timeoutSeconds}s timeout)`;
       if (step.condition === 'gone')
         return `wait until "${step.text}" is gone (${step.timeoutSeconds}s timeout)`;
       return `wait until "${step.text}" is visible (${step.timeoutSeconds}s timeout)`;
@@ -306,7 +305,7 @@ function stepLabel(step: FlowStep): string {
     case 'longPress':
       return `long-press "${step.label}"${step.duration != null ? ` (${step.duration}ms)` : ''}`;
     case 'type':
-      return `type "${step.text.length > 40 ? `${step.text.slice(0, 37)}…` : step.text}"`;
+      return `type "${step.sensitive ? '***' : step.text.length > 40 ? `${step.text.slice(0, 37)}…` : step.text}"${step.selector ? ` in selector(${describeElementSelector(step.selector)})` : ''}`;
     case 'enter':
       return 'enter';
     case 'back':
@@ -314,20 +313,30 @@ function stepLabel(step: FlowStep): string {
     case 'home':
       return 'goHome';
     case 'swipe':
-      return `swipe ${step.direction}`;
+      return `swipe ${step.direction}${step.selector ? ` from selector(${describeElementSelector(step.selector)})` : ''}`;
     case 'zoom':
-      return `zoom ${step.scale >= 1 ? 'in' : 'out'} (${step.scale}x)${step.target ? ` on "${step.target}"` : ''}`;
+      return `zoom ${step.scale >= 1 ? 'in' : 'out'} (${step.scale}x)${step.selector ? ` on selector(${describeElementSelector(step.selector)})` : step.target ? ` on "${step.target}"` : ''}`;
     case 'drag':
       return `drag "${step.from}" to "${step.to}"`;
     case 'assert':
-      return `assert "${step.text}"`;
+      return step.selector
+        ? `assert selector(${describeElementSelector(step.selector)})`
+        : `assert "${step.text ?? ''}"`;
     case 'scrollAssert':
-      return `scroll ${step.direction} until "${step.text}"${step.target ? ` (on "${step.target}")` : ''}`;
+      return `scroll ${step.direction} until ${
+        step.selector
+          ? `selector(${describeElementSelector(step.selector)})`
+          : `"${step.text ?? ''}"`
+      }${step.target ? ` (on "${step.target}")` : ''}`;
     case 'getInfo':
       return `getInfo "${step.query.length > 50 ? `${step.query.slice(0, 47)}…` : step.query}"`;
     case 'done':
       return step.message ? `done (${step.message})` : 'done';
   }
+}
+
+function stepLabel(step: FlowStep): string {
+  return redactSensitiveValues(rawStepLabel(step), step.sensitiveValues);
 }
 
 /**
@@ -1332,11 +1341,14 @@ async function flowTypeText(
   target?: string,
   deviceUdid?: string,
   poll: FlowTapPollOptions = { maxAttempts: 10, intervalMs: 300 },
-  proximity?: Proximity
+  proximity?: Proximity,
+  selector?: ElementSelector,
+  sensitive = false
 ): Promise<ActionResult> {
+  if (selector) return typeBySelector(mcp, text, selector, poll, deviceUdid);
   if (appclawDebug)
     ui.printAgentBullet(
-      `[type] text="${text}", target=${target ?? '(none)'}` +
+      `[type] text="${sensitive ? '***' : text}", target=${target ?? '(none)'}` +
         (proximity ? `, proximity=${proximity.relation}:"${proximity.anchor}"` : '')
     );
   // ── If a target field is specified, tap it first to focus (implicit wait) ──
@@ -1586,12 +1598,203 @@ function evaluateSpatialRelation(
 }
 
 /** Parse current page source into elements. */
-async function getScreenElements(mcp: MCPClient): Promise<UIElement[]> {
+async function getScreenElements(mcp: MCPClient, includeHidden = false): Promise<UIElement[]> {
   const pageSource = await getPageSource(mcp);
   const platform = detectPlatform(pageSource);
   return platform === 'android'
     ? parseAndroidPageSource(pageSource)
-    : parseIOSPageSource(pageSource);
+    : parseIOSPageSource(pageSource, { includeHidden });
+}
+
+function selectorDiagnostics(
+  selector: ElementSelector,
+  elements: UIElement[],
+  failures?: string[]
+): SelectorDiagnostics {
+  return {
+    selector,
+    matchedCount: elements.length,
+    // Keep reports useful but bounded on list-heavy screens.
+    matched: elements.slice(0, 20).map(snapshotElement),
+    ...(failures?.length ? { failures } : {}),
+  };
+}
+
+interface StructuredActionTarget {
+  element?: UIElement;
+  diagnostics: SelectorDiagnostics;
+  error?: string;
+}
+
+/**
+ * Resolve one deterministic action target with implicit waiting.
+ * Structured selectors never consult vision, and ambiguity is an explicit error.
+ */
+async function resolveStructuredActionTarget(
+  mcp: MCPClient,
+  selector: ElementSelector,
+  poll: FlowTapPollOptions
+): Promise<StructuredActionTarget> {
+  let lastCandidates: UIElement[] = [];
+  let lastError = `No visible element matched selector(${describeElementSelector(selector)})`;
+  for (let attempt = 0; attempt < poll.maxAttempts; attempt++) {
+    const elements = (await getScreenElements(mcp)).filter((element) => element.visible !== false);
+    const resolution = resolveElementSelector(elements, selector);
+    lastCandidates = resolution.matches;
+    if (selector.index == null && resolution.matches.length > 1) {
+      lastError =
+        `Structured selector is ambiguous: matched ${resolution.matches.length} elements; ` +
+        'add index or a relation selector';
+      return {
+        diagnostics: selectorDiagnostics(selector, resolution.matches, [lastError]),
+        error: lastError,
+      };
+    }
+    if (resolution.matches.length === 1) {
+      return {
+        element: resolution.matches[0],
+        diagnostics: selectorDiagnostics(selector, resolution.matches),
+      };
+    }
+    if (resolution.indexOutOfRange) {
+      lastError = `Selector index ${selector.index} is out of range (${resolution.allMatches.length} candidate(s))`;
+    }
+    if (attempt + 1 < poll.maxAttempts) await sleep(poll.intervalMs);
+  }
+  return {
+    diagnostics: selectorDiagnostics(selector, lastCandidates, [lastError]),
+    error: lastError,
+  };
+}
+
+async function tapBySelector(
+  mcp: MCPClient,
+  selector: ElementSelector,
+  poll: FlowTapPollOptions,
+  gesture: TapGesture = 'tap'
+): Promise<ActionResult> {
+  const target = await resolveStructuredActionTarget(mcp, selector, poll);
+  if (!target.element) {
+    return {
+      success: false,
+      message: target.error ?? 'Structured selector did not resolve',
+      selectorDiagnostics: target.diagnostics,
+    };
+  }
+  const beforeScreenshot = await capturePreAction(mcp);
+  const [x, y] = target.element.center;
+  const success = await gestureAtCoordinates(mcp, x, y, gesture);
+  return {
+    success,
+    message: success
+      ? `${gestureVerb(gesture)} selector(${describeElementSelector(selector)}) at [${x}, ${y}]`
+      : `Could not ${gesture === 'tap' ? 'tap' : 'double-tap'} selector(${describeElementSelector(selector)})`,
+    beforeScreenshot,
+    selectorDiagnostics: target.diagnostics,
+  };
+}
+
+async function longPressBySelector(
+  mcp: MCPClient,
+  selector: ElementSelector,
+  poll: FlowTapPollOptions,
+  duration = 2000
+): Promise<ActionResult> {
+  const target = await resolveStructuredActionTarget(mcp, selector, poll);
+  if (!target.element) {
+    return {
+      success: false,
+      message: target.error ?? 'Structured selector did not resolve',
+      selectorDiagnostics: target.diagnostics,
+    };
+  }
+  const [x, y] = target.element.center;
+  const result = await mcp.callTool('appium_gesture', {
+    action: 'long_press',
+    x,
+    y,
+    duration,
+  });
+  const response =
+    result.content?.map((content: any) => (content.type === 'text' ? content.text : '')).join('') ??
+    '';
+  const success =
+    !response.toLowerCase().includes('error') && !response.toLowerCase().includes('failed');
+  return {
+    success,
+    message: success
+      ? `Long-pressed selector(${describeElementSelector(selector)}) at [${x}, ${y}] (${duration}ms)`
+      : `Long-press failed: ${response.slice(0, 200)}`,
+    selectorDiagnostics: target.diagnostics,
+  };
+}
+
+async function typeBySelector(
+  mcp: MCPClient,
+  text: string,
+  selector: ElementSelector,
+  poll: FlowTapPollOptions,
+  deviceUdid?: string
+): Promise<ActionResult> {
+  const target = await resolveStructuredActionTarget(mcp, selector, poll);
+  if (!target.element) {
+    return {
+      success: false,
+      message: target.error ?? 'Structured selector did not resolve',
+      selectorDiagnostics: target.diagnostics,
+    };
+  }
+  if (!target.element.editable) {
+    const error = `Matched element is not editable (${target.element.type || 'unknown type'})`;
+    target.diagnostics.failures = [error];
+    return { success: false, message: error, selectorDiagnostics: target.diagnostics };
+  }
+  const [x, y] = target.element.center;
+  const focused = await tapAtCoordinates(mcp, x, y);
+  if (!focused) {
+    const error = 'Could not focus structured selector target';
+    target.diagnostics.failures = [error];
+    return { success: false, message: error, selectorDiagnostics: target.diagnostics };
+  }
+  await sleep(Config.CLOUD_PROVIDER ? 1200 : 300);
+  let typed = await typeViaSetValue(mcp, text);
+  if (!typed.success && target.element.platform === 'android') {
+    typed = await typeViaKeyboard(text, deviceUdid);
+  }
+  return {
+    success: typed.success,
+    message: typed.success
+      ? `Typed "${text}" in selector(${describeElementSelector(selector)}) at [${x}, ${y}]`
+      : typed.message,
+    selectorDiagnostics: target.diagnostics,
+  };
+}
+
+async function assertStructuredSelector(
+  mcp: MCPClient,
+  selector: ElementSelector,
+  properties: ElementPropertyExpectations | undefined,
+  count: NumericExpectation | undefined,
+  poll: FlowTapPollOptions
+): Promise<ActionResult> {
+  let last = evaluateStructuredAssertion([], selector, properties, count);
+  for (let attempt = 0; attempt < poll.maxAttempts; attempt++) {
+    const elements = await getScreenElements(mcp, true);
+    last = evaluateStructuredAssertion(elements, selector, properties, count);
+    if (last.success) {
+      return {
+        success: true,
+        message: last.message,
+        selectorDiagnostics: last.diagnostics,
+      };
+    }
+    if (attempt + 1 < poll.maxAttempts) await sleep(poll.intervalMs);
+  }
+  return {
+    success: false,
+    message: last.message,
+    selectorDiagnostics: last.diagnostics,
+  };
 }
 
 const ASSERT_DOM_POLLS_BEFORE_VISION = 3;
@@ -1708,10 +1911,11 @@ async function visionAssert(mcp: MCPClient, text: string): Promise<boolean> {
 async function assertTextVisible(
   mcp: MCPClient,
   text: string,
-  poll: FlowTapPollOptions
+  poll: FlowTapPollOptions,
+  allowVision = true
 ): Promise<ActionResult> {
-  const visionFirst = isVisionMode();
-  const useVision = isVisionLocateEnabled();
+  const visionFirst = allowVision && isVisionMode();
+  const useVision = allowVision && isVisionLocateEnabled();
   let lastElements: UIElement[] = [];
 
   // ── Check for spatial/relational assertions (e.g. "Jest is below Jasmine") ──
@@ -1813,13 +2017,14 @@ async function resolveScrollAnchorCenter(
 
 async function scrollUntilVisible(
   mcp: MCPClient,
-  text: string,
+  text: string | undefined,
   direction: 'up' | 'down' | 'left' | 'right',
   maxScrolls: number,
   poll: FlowTapPollOptions,
   distance?: ScrollDistance,
   target?: string,
-  targetProximity?: Proximity
+  targetProximity?: Proximity,
+  selector?: ElementSelector
 ): Promise<ActionResult> {
   const visionFirst = isVisionMode();
   const useVision = isVisionLocateEnabled();
@@ -1849,7 +2054,16 @@ async function scrollUntilVisible(
     anchorCoords && (direction === 'left' || direction === 'right') ? 'swipe' : 'scroll';
 
   // Helper: check if text is currently visible on screen
+  let selectorMatches: UIElement[] = [];
   const isVisible = async (): Promise<boolean> => {
+    if (selector) {
+      const elements = await getScreenElements(mcp);
+      selectorMatches = resolveElementSelector(elements, selector).matches.filter(
+        (element) => element.visible !== false
+      );
+      return selectorMatches.length > 0;
+    }
+    if (!text) return false;
     if (visionFirst) {
       return visionAssert(mcp, text);
     }
@@ -1865,7 +2079,10 @@ async function scrollUntilVisible(
   if (await isVisible()) {
     return {
       success: true,
-      message: `"${text}" already visible on screen (no scroll needed)`,
+      message: selector
+        ? `selector(${describeElementSelector(selector)}) already visible on screen (no scroll needed)`
+        : `"${text}" already visible on screen (no scroll needed)`,
+      ...(selector ? { selectorDiagnostics: selectorDiagnostics(selector, selectorMatches) } : {}),
     };
   }
 
@@ -1880,7 +2097,12 @@ async function scrollUntilVisible(
     if (await isVisible()) {
       return {
         success: true,
-        message: `Found "${text}" after ${scroll + 1} scroll(s) ${direction}${onNote}`,
+        message: selector
+          ? `Found selector(${describeElementSelector(selector)}) after ${scroll + 1} scroll(s) ${direction}${onNote}`
+          : `Found "${text}" after ${scroll + 1} scroll(s) ${direction}${onNote}`,
+        ...(selector
+          ? { selectorDiagnostics: selectorDiagnostics(selector, selectorMatches) }
+          : {}),
       };
     }
   }
@@ -1898,9 +2120,15 @@ async function scrollUntilVisible(
     /* ignore */
   }
 
+  const failure = selector
+    ? `selector(${describeElementSelector(selector)}) not found after ${maxScrolls} scroll(s) ${direction}${onNote}`
+    : `"${text}" not found after ${maxScrolls} scroll(s) ${direction}${onNote}${screenSummary}`;
   return {
     success: false,
-    message: `"${text}" not found after ${maxScrolls} scroll(s) ${direction}${onNote}${screenSummary}`,
+    message: failure,
+    ...(selector
+      ? { selectorDiagnostics: selectorDiagnostics(selector, selectorMatches, [failure]) }
+      : {}),
   };
 }
 
@@ -1913,7 +2141,8 @@ async function waitUntilCondition(
   condition: 'visible' | 'gone' | 'screenLoaded',
   text: string | undefined,
   timeoutSeconds: number,
-  poll: FlowTapPollOptions
+  poll: FlowTapPollOptions,
+  selector?: ElementSelector
 ): Promise<ActionResult> {
   const pollMs = 500;
   const deadline = Date.now() + timeoutSeconds * 1000;
@@ -1959,6 +2188,39 @@ async function waitUntilCondition(
     return { success: false, message: `Screen did not stabilize within ${timeoutSeconds}s` };
   }
 
+  if (selector) {
+    let lastMatches: UIElement[] = [];
+    while (Date.now() < deadline) {
+      const elements = await getScreenElements(mcp);
+      const resolution = resolveElementSelector(elements, selector);
+      lastMatches = resolution.matches.filter((element) => element.visible !== false);
+      if (condition === 'visible' && lastMatches.length > 0) {
+        return {
+          success: true,
+          message: `selector(${describeElementSelector(selector)}) appeared on screen`,
+          selectorDiagnostics: selectorDiagnostics(selector, lastMatches),
+        };
+      }
+      if (condition === 'gone' && lastMatches.length === 0) {
+        return {
+          success: true,
+          message: `selector(${describeElementSelector(selector)}) is no longer on screen`,
+          selectorDiagnostics: selectorDiagnostics(selector, []),
+        };
+      }
+      await sleep(pollMs);
+    }
+    const failure =
+      condition === 'visible'
+        ? `selector(${describeElementSelector(selector)}) did not appear within ${timeoutSeconds}s`
+        : `selector(${describeElementSelector(selector)}) did not disappear within ${timeoutSeconds}s`;
+    return {
+      success: false,
+      message: failure,
+      selectorDiagnostics: selectorDiagnostics(selector, lastMatches, [failure]),
+    };
+  }
+
   if (!text) {
     return { success: false, message: `waitUntil "${condition}" requires a text/element target` };
   }
@@ -1995,7 +2257,7 @@ async function waitUntilCondition(
   return { success: false, message: `"${text}" did not disappear within ${timeoutSeconds}s` };
 }
 
-export async function executeStep(
+async function executeStepUnredacted(
   mcp: MCPClient,
   step: FlowStep,
   meta: FlowMeta,
@@ -2010,6 +2272,9 @@ export async function executeStep(
   if (
     isVisionMode() &&
     step.verbatim &&
+    // Secret-bearing type steps stay on the focused-field + local keyboard path;
+    // never put resolved credentials into a vision instruction.
+    !step.sensitive &&
     (step.kind === 'tap' || step.kind === 'type' || step.kind === 'assert')
   ) {
     const { visionExecute } = await import('./vision-execute.js');
@@ -2137,15 +2402,38 @@ export async function executeStep(
       await sleep(Math.round(step.seconds * 1000));
       return { success: true, message: `Waited ${step.seconds}s` };
     case 'waitUntil':
-      return waitUntilCondition(mcp, step.condition, step.text, step.timeoutSeconds, tapPoll);
+      return waitUntilCondition(
+        mcp,
+        step.condition,
+        step.text,
+        step.timeoutSeconds,
+        tapPoll,
+        step.selector
+      );
     case 'tap':
-      return tapByLabel(mcp, step.label, tapPoll, step.proximity);
+      return step.selector
+        ? tapBySelector(mcp, step.selector, tapPoll)
+        : tapByLabel(mcp, step.label, tapPoll, step.proximity);
     case 'doubleTap':
-      return tapByLabel(mcp, step.label, tapPoll, step.proximity, 'double_tap');
+      return step.selector
+        ? tapBySelector(mcp, step.selector, tapPoll, 'double_tap')
+        : tapByLabel(mcp, step.label, tapPoll, step.proximity, 'double_tap');
     case 'longPress':
-      return longPressByLabel(mcp, step.label, step.duration);
-    case 'type':
-      return flowTypeText(mcp, step.text, step.target, deviceUdid, tapPoll, step.proximity);
+      return step.selector
+        ? longPressBySelector(mcp, step.selector, tapPoll, step.duration)
+        : longPressByLabel(mcp, step.label, step.duration);
+    case 'type': {
+      return flowTypeText(
+        mcp,
+        step.text,
+        step.target,
+        deviceUdid,
+        tapPoll,
+        step.proximity,
+        step.selector,
+        step.sensitive
+      );
+    }
     case 'enter':
       return pressEnterKey(mcp);
     case 'back':
@@ -2164,7 +2452,19 @@ export async function executeStep(
       // screen-center swipe if the element can't be located.
       let anchorCoords: { x: number; y: number; endX: number; endY: number } | null = null;
       let anchored = false;
-      if (step.target) {
+      if (step.selector) {
+        const resolved = await resolveStructuredActionTarget(mcp, step.selector, tapPoll);
+        if (!resolved.element) {
+          return {
+            success: false,
+            message: resolved.error ?? 'Structured swipe target did not resolve',
+            selectorDiagnostics: resolved.diagnostics,
+          };
+        }
+        const center = resolved.element.center;
+        anchorCoords = anchoredSwipeCoords(mcp, center, dir, scroll?.distance);
+        anchored = true;
+      } else if (step.target) {
         const center = await resolveTargetCenter(mcp, step.target);
         if (center) {
           anchorCoords = anchoredSwipeCoords(mcp, center, dir, scroll?.distance);
@@ -2211,6 +2511,38 @@ export async function executeStep(
       // Vision mode: use df-vision to locate the element by description.
       // DOM mode: parse page source and find element UUID.
       let elementUUID: string | undefined;
+      if (step.selector) {
+        const resolved = await resolveStructuredActionTarget(mcp, step.selector, tapPoll);
+        if (!resolved.element) {
+          return {
+            success: false,
+            message: resolved.error ?? 'Structured zoom target did not resolve',
+            selectorDiagnostics: resolved.diagnostics,
+          };
+        }
+        const [x, y] = resolved.element.center;
+        const pinchResult = await mcp.callTool('appium_gesture', {
+          action: 'pinch_zoom',
+          scale: step.scale,
+          x,
+          y,
+        });
+        const pinchText =
+          pinchResult.content
+            ?.map((content: { type: string; text?: string }) =>
+              content.type === 'text' ? content.text : ''
+            )
+            .join('') ?? '';
+        const failed =
+          pinchText.toLowerCase().includes('failed') || pinchText.toLowerCase().includes('error');
+        return {
+          success: !failed,
+          message: failed
+            ? pinchText.slice(0, 200)
+            : `Zoomed ${step.scale >= 1 ? 'in' : 'out'} on selector(${describeElementSelector(step.selector)}) at [${x}, ${y}]`,
+          selectorDiagnostics: resolved.diagnostics,
+        };
+      }
       if (step.target) {
         try {
           if (isVisionMode() || isVisionLocateEnabled()) {
@@ -2377,7 +2709,9 @@ export async function executeStep(
       };
     }
     case 'assert':
-      return assertTextVisible(mcp, step.text, tapPoll);
+      return step.selector
+        ? assertStructuredSelector(mcp, step.selector, step.properties, step.count, tapPoll)
+        : assertTextVisible(mcp, step.text ?? '', tapPoll, !step.sensitive);
     case 'scrollAssert':
       return scrollUntilVisible(
         mcp,
@@ -2387,7 +2721,8 @@ export async function executeStep(
         tapPoll,
         scroll?.distance,
         step.target,
-        step.targetProximity
+        step.targetProximity,
+        step.selector
       );
     case 'getInfo': {
       const infoApiKey = getStarkVisionApiKey();
@@ -2437,6 +2772,35 @@ export async function executeStep(
   }
 }
 
+/** Execute one step while ensuring resolved secrets cannot reach logs or reports. */
+export async function executeStep(
+  mcp: MCPClient,
+  step: FlowStep,
+  meta: FlowMeta,
+  appResolver: AppResolver | undefined,
+  tapPoll: FlowTapPollOptions,
+  deviceUdid?: string,
+  scroll?: ScrollControl
+): Promise<ActionResult> {
+  const result = await executeStepUnredacted(
+    mcp,
+    step,
+    meta,
+    appResolver,
+    tapPoll,
+    deviceUdid,
+    scroll
+  );
+  if (!step.sensitiveValues?.length) return result;
+  // Screenshot payloads are base64/binary-like and cannot contain the plain
+  // resolved value; keep them out of the recursive string-redaction pass.
+  const { beforeScreenshot, ...redactable } = result;
+  return {
+    ...redactSensitiveData(redactable, step.sensitiveValues),
+    ...(beforeScreenshot ? { beforeScreenshot } : {}),
+  };
+}
+
 /**
  * Execute a single phase (setup / test / assertion) and return its result.
  * Extracted for SRP: the runner orchestrates phases, this handles one.
@@ -2469,10 +2833,9 @@ async function executePhase(
     const label = stepLabel(step);
     const globalN = globalStepOffset + i + 1;
 
-    // Debug: show resolved value when secrets are redacted
+    // Confirm interpolation in debug mode without ever printing resolved secrets.
     if (appclawDebug && step.verbatim?.includes('***')) {
-      const resolved = stepLabelResolved(step);
-      if (resolved) ui.printAgentBullet(`[debug] resolved → ${resolved}`);
+      ui.printAgentBullet('[debug] secret placeholders resolved (values redacted)');
     }
 
     const globalIdx = globalStepOffset + i;
@@ -2534,6 +2897,7 @@ async function executePhase(
         message: result.message,
         tapCoordinates: tapCoords,
         deviceScreenSize: getCachedScreenSize(mcp) ?? undefined,
+        selectorDiagnostics: result.selectorDiagnostics,
       });
       // In vision mode, visionExecute already captured the pre-action screenshot.
       // - Tap actions: attach as "before" so the tap dot overlay is rendered.
@@ -2702,8 +3066,7 @@ export async function runYamlFlow(
     const n = i + 1;
 
     if (appclawDebug && step.verbatim?.includes('***')) {
-      const resolved = stepLabelResolved(step);
-      if (resolved) ui.printAgentBullet(`[debug] resolved → ${resolved}`);
+      ui.printAgentBullet('[debug] secret placeholders resolved (values redacted)');
     }
 
     options.artifactCollector?.startStep(i);
@@ -2764,6 +3127,7 @@ export async function runYamlFlow(
         message: result.message,
         tapCoordinates: tapCoords,
         deviceScreenSize: getCachedScreenSize(mcp) ?? undefined,
+        selectorDiagnostics: result.selectorDiagnostics,
       });
       // In vision mode, visionExecute already captured the pre-action screenshot.
       // - Tap actions: attach as "before" so the tap dot overlay is rendered.

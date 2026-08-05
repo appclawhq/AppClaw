@@ -48,8 +48,8 @@ export interface AgentElement {
   bounds: string;
   action: UIElement['action'];
   enabled: boolean;
-  checked: boolean;
-  focused: boolean;
+  checked?: boolean;
+  focused?: boolean;
   selector?: AgentSelector;
 }
 

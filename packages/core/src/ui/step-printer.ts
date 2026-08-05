@@ -15,6 +15,8 @@
 import chalk from 'chalk';
 import { theme } from './terminal.js';
 import type { FlowStep } from '../flow/types.js';
+import { describeElementSelector } from '../flow/selector.js';
+import { redactSensitiveValues } from '../flow/variable-resolver.js';
 
 /** Short verb word for a step kind — fits in a fixed-width badge. */
 export function stepAction(step: FlowStep): string {
@@ -61,7 +63,7 @@ export function stepAction(step: FlowStep): string {
 }
 
 /** Human-readable target description for a step. */
-export function stepTarget(step: FlowStep): string {
+function rawStepTarget(step: FlowStep): string {
   switch (step.kind) {
     case 'launchApp':
       return 'app';
@@ -76,15 +78,17 @@ export function stepTarget(step: FlowStep): string {
     case 'longPress':
       return `"${step.label}"${step.duration != null ? ` (${step.duration}ms)` : ''}`;
     case 'type':
-      return `"${step.text}"${step.target ? ` → ${step.target}` : ''}`;
+      return `"${step.text}"${step.selector ? ` → selector(${describeElementSelector(step.selector)})` : step.target ? ` → ${step.target}` : ''}`;
     case 'swipe':
-      return step.direction;
+      return `${step.direction}${step.selector ? ` from selector(${describeElementSelector(step.selector)})` : ''}`;
     case 'zoom':
-      return `${step.scale >= 1 ? 'in' : 'out'} (${step.scale}x)${step.target ? ` on "${step.target}"` : ''}`;
+      return `${step.scale >= 1 ? 'in' : 'out'} (${step.scale}x)${step.selector ? ` on selector(${describeElementSelector(step.selector)})` : step.target ? ` on "${step.target}"` : ''}`;
     case 'wait':
       return `${step.seconds}s`;
     case 'waitUntil':
       if (step.condition === 'screenLoaded') return `screen loaded (${step.timeoutSeconds}s)`;
+      if (step.selector)
+        return `selector(${describeElementSelector(step.selector)}) ${step.condition === 'gone' ? 'gone' : 'visible'} (${step.timeoutSeconds}s)`;
       if (step.condition === 'gone') return `"${step.text}" gone (${step.timeoutSeconds}s)`;
       return `"${step.text}" visible (${step.timeoutSeconds}s)`;
     case 'enter':
@@ -94,9 +98,15 @@ export function stepTarget(step: FlowStep): string {
     case 'home':
       return '';
     case 'assert':
-      return `"${step.text}"`;
+      return step.selector
+        ? `selector(${describeElementSelector(step.selector)})`
+        : `"${step.text ?? ''}"`;
     case 'scrollAssert':
-      return `"${step.text}" ${step.direction} ×${step.maxScrolls}${step.target ? ` on "${step.target}"` : ''}`;
+      return `${
+        step.selector
+          ? `selector(${describeElementSelector(step.selector)})`
+          : `"${step.text ?? ''}"`
+      } ${step.direction} ×${step.maxScrolls}${step.target ? ` on "${step.target}"` : ''}`;
     case 'drag':
       return `"${step.from}" → "${step.to}"`;
     case 'getInfo':
@@ -104,6 +114,10 @@ export function stepTarget(step: FlowStep): string {
     case 'done':
       return step.message ?? '';
   }
+}
+
+export function stepTarget(step: FlowStep): string {
+  return redactSensitiveValues(rawStepTarget(step), step.sensitiveValues);
 }
 
 /**

@@ -44,6 +44,7 @@ import type {
   PhasedStep,
   ParsedFlow,
   ParsedSuite,
+  ElementSelector,
 } from './types.js';
 import { tryParseNaturalFlowLine } from './natural-line.js';
 import { resolveNaturalStep } from './llm-parser.js';
@@ -57,8 +58,193 @@ import {
   loadInlineBindings,
   type VariableBindings,
 } from './variable-resolver.js';
+import {
+  describeElementSelector,
+  parseElementSelector,
+  parseNumericExpectation,
+  parsePropertyExpectations,
+} from './selector.js';
 
 // ── Step normalizer (unchanged logic, extracted for SRP) ───────────
+
+function structuredRecord(raw: unknown, context: string): Record<string, unknown> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error(`${context} must be a YAML object`);
+  }
+  return raw as Record<string, unknown>;
+}
+
+function selectorWithout(
+  config: Record<string, unknown>,
+  reserved: readonly string[]
+): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(config).filter(([key]) => !reserved.includes(key)));
+}
+
+function rejectUnknownKeys(
+  config: Record<string, unknown>,
+  allowed: readonly string[],
+  context: string
+): void {
+  const allowedSet = new Set(allowed);
+  const unknown = Object.keys(config).filter((key) => !allowedSet.has(key));
+  if (unknown.length) throw new Error(`${context}: unknown key(s): ${unknown.join(', ')}`);
+}
+
+function rejectConflictingTargetKeys(config: Record<string, unknown>, context: string): void {
+  if (config.target != null && config.selector != null) {
+    throw new Error(`${context} cannot combine target and selector`);
+  }
+}
+
+function parseActionSelector(
+  raw: unknown,
+  context: string,
+  reserved: readonly string[] = []
+): ElementSelector {
+  if (typeof raw === 'string') return parseElementSelector(raw, context);
+  const config = structuredRecord(raw, context);
+  rejectConflictingTargetKeys(config, context);
+  const target = config.target ?? config.selector;
+  if (target != null) {
+    rejectUnknownKeys(config, ['target', 'selector', ...reserved], context);
+  }
+  return parseElementSelector(
+    target ?? selectorWithout(config, ['target', 'selector', ...reserved]),
+    `${context}.target`
+  );
+}
+
+function structuredTargetLabel(selector: ElementSelector): string {
+  return `selector(${describeElementSelector(selector)})`;
+}
+
+function parseWaitUntilStep(
+  raw: unknown,
+  index: number,
+  outerTimeout: unknown,
+  forceGone: boolean
+): FlowStep {
+  const context = `Step ${index + 1}: waitUntil`;
+  if (typeof raw !== 'object' || raw == null || Array.isArray(raw)) {
+    const text = String(raw).trim();
+    const timeout = Number(outerTimeout ?? 10);
+    if (!Number.isFinite(timeout) || timeout < 1) {
+      throw new Error(`${context} timeout must be a positive number`);
+    }
+    const lower = text.toLowerCase();
+    if (
+      !forceGone &&
+      ['screen loaded', 'screenloaded', 'screen ready', 'screen stable'].includes(lower)
+    ) {
+      return { kind: 'waitUntil', condition: 'screenLoaded', timeoutSeconds: timeout };
+    }
+    return {
+      kind: 'waitUntil',
+      condition: forceGone ? 'gone' : 'visible',
+      text,
+      timeoutSeconds: timeout,
+    };
+  }
+
+  const config = structuredRecord(raw, context);
+  rejectConflictingTargetKeys(config, context);
+  const explicitTargetKeys = ['target', 'selector', 'visible', 'gone', 'notVisible'].filter(
+    (key) => config[key] != null
+  );
+  if (explicitTargetKeys.length > 1) {
+    throw new Error(`${context} cannot combine ${explicitTargetKeys.join(' and ')}`);
+  }
+  if (explicitTargetKeys.length > 0) {
+    rejectUnknownKeys(
+      config,
+      ['target', 'selector', 'visible', 'gone', 'notVisible', 'condition', 'timeout'],
+      context
+    );
+  }
+  const timeout = Number(config.timeout ?? outerTimeout ?? 10);
+  if (!Number.isFinite(timeout) || timeout < 1) {
+    throw new Error(`${context} timeout must be a positive number`);
+  }
+  const conditionRaw = String(config.condition ?? (forceGone ? 'gone' : 'visible'));
+  let condition: 'visible' | 'gone' | 'screenLoaded';
+  if (conditionRaw === 'notVisible') condition = 'gone';
+  else if (['visible', 'gone', 'screenLoaded'].includes(conditionRaw)) {
+    condition = conditionRaw as typeof condition;
+  } else {
+    throw new Error(`${context}.condition must be visible, gone, notVisible, or screenLoaded`);
+  }
+  if (condition === 'screenLoaded') {
+    if (explicitTargetKeys.length > 0) {
+      throw new Error(`${context}.condition=screenLoaded cannot include a target selector`);
+    }
+    return { kind: 'waitUntil', condition, timeoutSeconds: timeout };
+  }
+
+  let selectorRaw: unknown = config.target ?? config.selector;
+  if (config.visible != null) {
+    selectorRaw = config.visible;
+    condition = 'visible';
+  } else if (config.gone != null || config.notVisible != null) {
+    selectorRaw = config.gone ?? config.notVisible;
+    condition = 'gone';
+  }
+  if (selectorRaw == null) {
+    selectorRaw = selectorWithout(config, [
+      'target',
+      'selector',
+      'visible',
+      'gone',
+      'notVisible',
+      'condition',
+      'timeout',
+    ]);
+  }
+  const selector = parseElementSelector(selectorRaw, `${context}.target`);
+  return { kind: 'waitUntil', condition, selector, timeoutSeconds: timeout };
+}
+
+function parseStructuredAssert(raw: unknown, index: number, mode: 'assert' | 'visible' | 'gone') {
+  if (typeof raw === 'string' && mode === 'assert') {
+    return { kind: 'assert', text: raw } as const;
+  }
+  const context = `Step ${index + 1}: assert`;
+  const config =
+    typeof raw === 'string' ? { target: { text: raw } } : structuredRecord(raw, context);
+  rejectConflictingTargetKeys(config, context);
+  if (config.target != null || config.selector != null) {
+    rejectUnknownKeys(config, ['target', 'selector', 'properties', 'count'], context);
+  }
+  const selectorRaw =
+    config.target ??
+    config.selector ??
+    selectorWithout(config, ['target', 'selector', 'properties', 'count']);
+  if (selectorRaw == null || Object.keys(selectorRaw as Record<string, unknown>).length === 0) {
+    throw new Error(`${context} structured form requires target or selector`);
+  }
+  const selector = parseElementSelector(selectorRaw, `${context}.target`);
+  let properties =
+    config.properties != null
+      ? parsePropertyExpectations(config.properties, `${context}.properties`)
+      : undefined;
+  if (mode !== 'assert') {
+    if (mode === 'gone' && (config.properties != null || config.count != null)) {
+      throw new Error(`${context} assertNotVisible cannot include properties or count`);
+    }
+    properties = { ...(properties ?? {}), visible: mode === 'visible' };
+  }
+  if (properties?.exists === false && Object.keys(properties).some((key) => key !== 'exists')) {
+    throw new Error(`${context}.properties.exists=false cannot be combined with other properties`);
+  }
+  const count =
+    config.count != null ? parseNumericExpectation(config.count, `${context}.count`) : undefined;
+  return {
+    kind: 'assert' as const,
+    selector,
+    ...(properties ? { properties } : {}),
+    ...(count != null ? { count } : {}),
+  };
+}
 
 export function normalizeStructured(raw: unknown, index: number): FlowStep | null {
   if (typeof raw === 'string') {
@@ -83,38 +269,33 @@ export function normalizeStructured(raw: unknown, index: number): FlowStep | nul
     if (keys.includes('waitUntil') || keys.includes('waitUntilGone')) {
       const isGone = keys.includes('waitUntilGone');
       const key = isGone ? 'waitUntilGone' : 'waitUntil';
-      const val = String(o[key]).trim();
-      const timeout = Number(o.timeout ?? 10);
-      if (!Number.isFinite(timeout) || timeout < 1) {
-        throw new Error(`Step ${index + 1}: waitUntil timeout must be a positive number`);
-      }
-      const valLower = val.toLowerCase();
-      if (
-        !isGone &&
-        (valLower === 'screen loaded' ||
-          valLower === 'screenloaded' ||
-          valLower === 'screen ready' ||
-          valLower === 'screen stable')
-      ) {
-        return { kind: 'waitUntil', condition: 'screenLoaded', timeoutSeconds: timeout };
-      }
-      return {
-        kind: 'waitUntil',
-        condition: isGone ? 'gone' : 'visible',
-        text: val,
-        timeoutSeconds: timeout,
-      };
+      return parseWaitUntilStep(o[key], index, o.timeout, isGone);
     }
 
     // ── Multi-key: zoom { scale, target? } ──
     if (keys.includes('zoom') || (keys.includes('scale') && !keys.includes('from'))) {
-      const scaleVal = o.zoom !== undefined ? Number(o.zoom) : Number(o.scale);
+      const zoomConfig =
+        o.zoom && typeof o.zoom === 'object' && !Array.isArray(o.zoom)
+          ? (o.zoom as Record<string, unknown>)
+          : keys.includes('scale')
+            ? o
+            : undefined;
+      const scaleVal = zoomConfig
+        ? Number(zoomConfig.scale ?? zoomConfig.zoom)
+        : o.zoom !== undefined
+          ? Number(o.zoom)
+          : Number(o.scale);
       if (!Number.isFinite(scaleVal) || scaleVal <= 0) {
         throw new Error(
           `Step ${index + 1}: zoom scale must be a positive number (e.g. 2.0 = zoom in 2x, 0.5 = zoom out)`
         );
       }
-      const target = o.target != null ? String(o.target).trim() : undefined;
+      const targetRaw = zoomConfig?.target ?? zoomConfig?.selector ?? o.target;
+      if (targetRaw && typeof targetRaw === 'object') {
+        const selector = parseElementSelector(targetRaw, `Step ${index + 1}: zoom.target`);
+        return { kind: 'zoom', scale: scaleVal, selector };
+      }
+      const target = targetRaw != null ? String(targetRaw).trim() : undefined;
       return { kind: 'zoom', scale: scaleVal, ...(target ? { target } : {}) };
     }
 
@@ -141,20 +322,36 @@ export function normalizeStructured(raw: unknown, index: number): FlowStep | nul
       const textKey = keys.find(
         (k) => k === 'scrollAssert' || k === 'scrollVerify' || k === 'scrollCheck'
       )!;
-      const text = String(o[textKey]);
-      const dir = String(o.direction ?? 'down').toLowerCase();
+      const rawTarget = o[textKey];
+      const config =
+        rawTarget && typeof rawTarget === 'object' && !Array.isArray(rawTarget)
+          ? (rawTarget as Record<string, unknown>)
+          : undefined;
+      const dir = String(config?.direction ?? o.direction ?? 'down').toLowerCase();
       if (!['up', 'down', 'left', 'right'].includes(dir)) {
         throw new Error(
           `Step ${index + 1}: scrollAssert direction must be up/down/left/right, got "${dir}"`
         );
       }
-      const maxScrolls = Number(o.maxScrolls ?? 3);
+      const maxScrolls = Number(config?.maxScrolls ?? o.maxScrolls ?? 3);
       if (!Number.isFinite(maxScrolls) || maxScrolls < 1) {
         throw new Error(`Step ${index + 1}: scrollAssert maxScrolls must be a positive number`);
       }
+      if (config) {
+        const selector = parseActionSelector(config, `Step ${index + 1}: scrollAssert`, [
+          'direction',
+          'maxScrolls',
+        ]);
+        return {
+          kind: 'scrollAssert',
+          selector,
+          direction: dir as 'up' | 'down' | 'left' | 'right',
+          maxScrolls,
+        };
+      }
       return {
         kind: 'scrollAssert',
-        text,
+        text: String(rawTarget),
         direction: dir as 'up' | 'down' | 'left' | 'right',
         maxScrolls,
         ...(o.target != null && o.target !== '' ? { target: String(o.target) } : {}),
@@ -206,8 +403,70 @@ export function normalizeStructured(raw: unknown, index: number): FlowStep | nul
         `Step ${index + 1}: drag requires "from to to" syntax, e.g. drag: "green dot to +100 mark"`
       );
     }
-    if (k === 'tap') return { kind: 'tap', label: String(v) };
-    if (k === 'doubleTap' || k === 'double_tap') return { kind: 'doubleTap', label: String(v) };
+    if (k === 'tap') {
+      if (v && typeof v === 'object') {
+        const selector = parseActionSelector(v, `Step ${index + 1}: tap`);
+        return { kind: 'tap', label: structuredTargetLabel(selector), selector };
+      }
+      return { kind: 'tap', label: String(v) };
+    }
+    if (k === 'doubleTap' || k === 'double_tap') {
+      if (v && typeof v === 'object') {
+        const selector = parseActionSelector(v, `Step ${index + 1}: doubleTap`);
+        return { kind: 'doubleTap', label: structuredTargetLabel(selector), selector };
+      }
+      return { kind: 'doubleTap', label: String(v) };
+    }
+    if (k === 'longPress' || k === 'long_press') {
+      if (v && typeof v === 'object') {
+        const config = structuredRecord(v, `Step ${index + 1}: longPress`);
+        const selector = parseActionSelector(config, `Step ${index + 1}: longPress`, ['duration']);
+        const duration = config.duration != null ? Number(config.duration) : undefined;
+        if (duration != null && (!Number.isFinite(duration) || duration <= 0)) {
+          throw new Error(`Step ${index + 1}: longPress.duration must be a positive number`);
+        }
+        return {
+          kind: 'longPress',
+          label: structuredTargetLabel(selector),
+          selector,
+          ...(duration != null ? { duration } : {}),
+        };
+      }
+      return { kind: 'longPress', label: String(v) };
+    }
+    if (k === 'swipe') {
+      const config = structuredRecord(v, `Step ${index + 1}: swipe`);
+      rejectUnknownKeys(
+        config,
+        ['direction', 'repeat', 'target', 'selector'],
+        `Step ${index + 1}: swipe`
+      );
+      rejectConflictingTargetKeys(config, `Step ${index + 1}: swipe`);
+      const direction = String(config.direction ?? '').toLowerCase();
+      if (!['up', 'down', 'left', 'right'].includes(direction)) {
+        throw new Error(`Step ${index + 1}: swipe.direction must be up/down/left/right`);
+      }
+      const repeat = config.repeat != null ? Number(config.repeat) : undefined;
+      if (repeat != null && (!Number.isInteger(repeat) || repeat < 1)) {
+        throw new Error(`Step ${index + 1}: swipe.repeat must be a positive integer`);
+      }
+      const targetRaw = config.target ?? config.selector;
+      if (targetRaw && typeof targetRaw === 'object') {
+        const selector = parseElementSelector(targetRaw, `Step ${index + 1}: swipe.target`);
+        return {
+          kind: 'swipe',
+          direction: direction as 'up' | 'down' | 'left' | 'right',
+          selector,
+          ...(repeat != null ? { repeat } : {}),
+        };
+      }
+      return {
+        kind: 'swipe',
+        direction: direction as 'up' | 'down' | 'left' | 'right',
+        ...(targetRaw != null ? { target: String(targetRaw) } : {}),
+        ...(repeat != null ? { repeat } : {}),
+      };
+    }
     if (k === 'zoom') {
       const scale = Number(v);
       if (!Number.isFinite(scale) || scale <= 0) {
@@ -217,9 +476,43 @@ export function normalizeStructured(raw: unknown, index: number): FlowStep | nul
       }
       return { kind: 'zoom', scale };
     }
-    if (k === 'type') return { kind: 'type', text: String(v) };
+    if (k === 'type') {
+      if (v && typeof v === 'object') {
+        const config = structuredRecord(v, `Step ${index + 1}: type`);
+        rejectUnknownKeys(
+          config,
+          ['value', 'text', 'into', 'target', 'selector'],
+          `Step ${index + 1}: type`
+        );
+        rejectConflictingTargetKeys(config, `Step ${index + 1}: type`);
+        const targetKeys = ['into', 'target', 'selector'].filter((key) => config[key] != null);
+        if (targetKeys.length > 1) {
+          throw new Error(`Step ${index + 1}: type cannot combine ${targetKeys.join(' and ')}`);
+        }
+        if (config.value != null && config.text != null) {
+          throw new Error(`Step ${index + 1}: type cannot combine value and text`);
+        }
+        const value = config.value ?? config.text;
+        if (value == null || typeof value === 'object') {
+          throw new Error(`Step ${index + 1}: type.value must be a string or scalar`);
+        }
+        const selectorRaw = config.into ?? config.target ?? config.selector;
+        if (selectorRaw != null) {
+          const selector = parseElementSelector(selectorRaw, `Step ${index + 1}: type.into`);
+          return { kind: 'type', text: String(value), selector };
+        }
+        return { kind: 'type', text: String(value) };
+      }
+      return { kind: 'type', text: String(v) };
+    }
     if (k === 'assert' || k === 'verify' || k === 'check') {
-      return { kind: 'assert', text: String(v) };
+      return parseStructuredAssert(v, index, 'assert');
+    }
+    if (k === 'assertVisible') {
+      return parseStructuredAssert(v, index, 'visible');
+    }
+    if (k === 'assertNotVisible') {
+      return parseStructuredAssert(v, index, 'gone');
     }
     if (k === 'getInfo') {
       return { kind: 'getInfo', query: String(v) };

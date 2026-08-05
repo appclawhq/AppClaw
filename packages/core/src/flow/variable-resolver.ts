@@ -21,6 +21,7 @@ export interface VariableBindings {
 export interface ResolveResult {
   resolved: string;
   redacted: string;
+  sensitiveValues: string[];
 }
 
 // ── Loading ────────────────────────────────────────────────────────
@@ -109,6 +110,7 @@ const PLACEHOLDER_RE = /\$\{(secrets|variables)\.([^}]+)\}/g;
 export function interpolate(template: string, bindings: VariableBindings): ResolveResult {
   let resolved = template;
   let redacted = template;
+  const sensitiveValues = new Set<string>();
 
   resolved = resolved.replace(PLACEHOLDER_RE, (_match, scope: string, key: string) => {
     if (scope === 'secrets') {
@@ -119,6 +121,7 @@ export function interpolate(template: string, bindings: VariableBindings): Resol
             `Set the environment variable "${key}" in your shell or .env file.`
         );
       }
+      if (value) sensitiveValues.add(value);
       return value;
     }
     if (!(key in bindings.variables)) {
@@ -137,7 +140,36 @@ export function interpolate(template: string, bindings: VariableBindings): Resol
     return _match;
   });
 
-  return { resolved, redacted };
+  return { resolved, redacted, sensitiveValues: [...sensitiveValues] };
+}
+
+/** Replace resolved secret values in any user-visible string. */
+export function redactSensitiveValues(text: string, sensitiveValues?: string[]): string {
+  if (!sensitiveValues?.length) return text;
+  return [...new Set(sensitiveValues)]
+    .filter(Boolean)
+    .sort((a, b) => b.length - a.length)
+    .reduce((redacted, value) => redacted.split(value).join('***'), text);
+}
+
+/** Recursively redact resolved secrets from report- or log-shaped data. */
+export function redactSensitiveData<T>(value: T, sensitiveValues?: string[]): T {
+  if (!sensitiveValues?.length) return value;
+  if (typeof value === 'string') {
+    return redactSensitiveValues(value, sensitiveValues) as T;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => redactSensitiveData(item, sensitiveValues)) as T;
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, nested]) => [
+        key,
+        redactSensitiveData(nested, sensitiveValues),
+      ])
+    ) as T;
+  }
+  return value;
 }
 
 /**
@@ -155,33 +187,53 @@ export function hasPlaceholders(text: string): boolean {
 export function interpolateStep<T extends Record<string, unknown>>(
   step: T,
   bindings: VariableBindings
-): T {
-  // Check if any interpolation is needed (variables in bindings or secrets in step strings)
-  const hasVars = Object.keys(bindings.variables).length > 0;
-  const hasSecretPlaceholders = Object.values(step).some(
-    (v) => typeof v === 'string' && /\$\{secrets\.[^}]+\}/.test(v)
-  );
-  if (!hasVars && !hasSecretPlaceholders) {
+): T & { sensitive?: boolean; sensitiveValues?: string[] } {
+  const containsPlaceholder = (value: unknown): boolean => {
+    if (typeof value === 'string') return hasPlaceholders(value);
+    if (Array.isArray(value)) return value.some(containsPlaceholder);
+    if (value && typeof value === 'object') return Object.values(value).some(containsPlaceholder);
+    return false;
+  };
+  if (!containsPlaceholder(step)) {
     return step;
   }
+  const containsSecret = (value: unknown): boolean => {
+    if (typeof value === 'string') return /\$\{secrets\.[^}]+\}/.test(value);
+    if (Array.isArray(value)) return value.some(containsSecret);
+    if (value && typeof value === 'object') return Object.values(value).some(containsSecret);
+    return false;
+  };
+  const sensitive = containsSecret(step);
+  const sensitiveValues = new Set<string>();
 
-  const result = { ...step };
-
-  // First pass: resolve all string fields (except verbatim)
-  for (const [key, val] of Object.entries(result)) {
-    if (key === 'verbatim') continue;
-    if (typeof val === 'string' && hasPlaceholders(val)) {
-      const { resolved } = interpolate(val, bindings);
-      (result as Record<string, unknown>)[key] = resolved;
+  const resolveNested = (value: unknown): unknown => {
+    if (typeof value === 'string') {
+      if (!hasPlaceholders(value)) return value;
+      const result = interpolate(value, bindings);
+      for (const secretValue of result.sensitiveValues) sensitiveValues.add(secretValue);
+      return result.resolved;
     }
+    if (Array.isArray(value)) return value.map(resolveNested);
+    if (value && typeof value === 'object') {
+      return Object.fromEntries(
+        Object.entries(value as Record<string, unknown>).map(([key, nested]) => [
+          key,
+          resolveNested(nested),
+        ])
+      );
+    }
+    return value;
+  };
+
+  const result = resolveNested(step) as T;
+  if (sensitive) {
+    (result as Record<string, unknown>).sensitive = true;
+    (result as Record<string, unknown>).sensitiveValues = [...sensitiveValues];
   }
 
-  // Second pass: set verbatim to redacted form (secrets hidden, variables shown)
-  if (typeof result.verbatim === 'string' && hasPlaceholders(result.verbatim)) {
-    (result as Record<string, unknown>).verbatim = interpolate(
-      result.verbatim as string,
-      bindings
-    ).redacted;
+  // Keep the user-facing natural-language instruction redacted.
+  if (typeof step.verbatim === 'string' && hasPlaceholders(step.verbatim)) {
+    (result as Record<string, unknown>).verbatim = interpolate(step.verbatim, bindings).redacted;
   }
 
   return result;

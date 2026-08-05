@@ -220,3 +220,157 @@ describe('parseFlowYamlString — errors', () => {
     await expect(parseFlowYamlString('- [unclosed')).rejects.toThrow();
   });
 });
+
+describe('parseFlowYamlString — structured selectors and property assertions', () => {
+  test('parses structured action targets, waits, assertions, and counts', async () => {
+    const yaml = `
+steps:
+  - tap:
+      target:
+        id: login_button
+        enabled: true
+  - type:
+      value: user@example.com
+      into:
+        accessibilityId: email_input
+  - waitUntil:
+      visible:
+        id: dashboard
+      timeout: 12
+assertions:
+  - assert:
+      target:
+        id: remember_me
+      properties:
+        visible: true
+        checked: true
+        width:
+          gte: 40
+  - assert:
+      target:
+        type: Cell
+      count:
+        gte: 1
+  - scrollAssert:
+      target:
+        id: footer
+      direction: down
+      maxScrolls: 4
+`;
+    const result = await parseFlowYamlString(yaml);
+    expect(result.steps[0]).toMatchObject({
+      kind: 'tap',
+      selector: { id: 'login_button', enabled: true },
+    });
+    expect(result.steps[1]).toMatchObject({
+      kind: 'type',
+      text: 'user@example.com',
+      selector: { accessibilityId: 'email_input' },
+    });
+    expect(result.steps[2]).toMatchObject({
+      kind: 'waitUntil',
+      condition: 'visible',
+      selector: { id: 'dashboard' },
+      timeoutSeconds: 12,
+    });
+    expect(result.steps[3]).toMatchObject({
+      kind: 'assert',
+      selector: { id: 'remember_me' },
+      properties: { visible: true, checked: true, width: { gte: 40 } },
+    });
+    expect(result.steps[4]).toMatchObject({
+      kind: 'assert',
+      selector: { type: 'Cell' },
+      count: { gte: 1 },
+    });
+    expect(result.steps[5]).toMatchObject({
+      kind: 'scrollAssert',
+      selector: { id: 'footer' },
+      direction: 'down',
+      maxScrolls: 4,
+    });
+  });
+
+  test('supports assertVisible/assertNotVisible and relation selectors', async () => {
+    const yaml = `
+- assertVisible:
+    id: submit_button
+- assertNotVisible:
+    id: loading_spinner
+- tap:
+    text: Submit
+    below:
+      id: password_input
+- longPress:
+    target:
+      accessibilityId: item_menu
+    duration: 1500
+`;
+    const result = await parseFlowYamlString(yaml);
+    expect(result.steps[0]).toMatchObject({
+      kind: 'assert',
+      selector: { id: 'submit_button' },
+      properties: { visible: true },
+    });
+    expect(result.steps[1]).toMatchObject({
+      kind: 'assert',
+      selector: { id: 'loading_spinner' },
+      properties: { visible: false },
+    });
+    expect(result.steps[2]).toMatchObject({
+      kind: 'tap',
+      selector: { text: 'Submit', below: { id: 'password_input' } },
+    });
+    expect(result.steps[3]).toMatchObject({
+      kind: 'longPress',
+      selector: { accessibilityId: 'item_menu' },
+      duration: 1500,
+    });
+  });
+
+  test('interpolates variables recursively inside selectors', async () => {
+    const yaml = `
+steps:
+  - tap:
+      target:
+        id: \${variables.login_id}
+`;
+    const result = await parseFlowYamlString(yaml, {
+      bindings: { variables: { login_id: 'login_button' } },
+    });
+    expect(result.steps[0]).toMatchObject({ selector: { id: 'login_button' } });
+  });
+
+  test('rejects unknown selector and property keys', async () => {
+    await expect(
+      parseFlowYamlString(`- tap:\n    target:\n      identifer: login`)
+    ).rejects.toThrow(/unknown selector key/i);
+    await expect(
+      parseFlowYamlString(
+        `- assert:\n    target:\n      id: login\n    properties:\n      enabledd: true`
+      )
+    ).rejects.toThrow(/unknown property key/i);
+  });
+
+  test('keeps legacy string actions unchanged', async () => {
+    const result = await parseFlowYamlString(`- tap: Login\n- assert: Dashboard`);
+    expect(result.steps[0]).toEqual({ kind: 'tap', label: 'Login' });
+    expect(result.steps[1]).toEqual({ kind: 'assert', text: 'Dashboard' });
+  });
+
+  test('rejects typos and conflicting keys around explicit structured targets', async () => {
+    await expect(
+      parseFlowYamlString(`- tap:\n    target:\n      id: submit\n    enabld: true`)
+    ).rejects.toThrow(/unknown key.*enabld/i);
+    await expect(
+      parseFlowYamlString(
+        `- type:\n    value: hello\n    into:\n      id: field\n    target:\n      id: other`
+      )
+    ).rejects.toThrow(/cannot combine into and target/i);
+    await expect(
+      parseFlowYamlString(
+        `- assert:\n    target:\n      id: submit\n    propertees:\n      enabled: true`
+      )
+    ).rejects.toThrow(/unknown key.*propertees/i);
+  });
+});

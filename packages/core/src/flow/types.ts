@@ -52,7 +52,128 @@ export interface ParsedSuite {
 }
 
 /** Set when the step was parsed from a natural-language YAML string (shown in CLI). */
-type Verbatim = { verbatim?: string };
+type Verbatim = {
+  verbatim?: string;
+  /** Internal marker: at least one resolved field originated from `${secrets.*}`. */
+  sensitive?: boolean;
+  /** Resolved secret values used to redact logs, labels, diagnostics, and reports. */
+  sensitiveValues?: string[];
+};
+
+/** How a structured selector compares a string-valued UI attribute. */
+export type StringMatchMode = 'exact' | 'contains' | 'regex';
+
+export interface StringMatcher {
+  value: string;
+  /** Structured selectors default to exact matching. */
+  match?: StringMatchMode;
+  /** Matching is case-insensitive unless explicitly enabled. */
+  caseSensitive?: boolean;
+}
+
+export type StringSelector = string | StringMatcher;
+
+/** Numeric matcher used by count, position, and dimension assertions. */
+export interface NumericMatcher {
+  equals?: number;
+  gte?: number;
+  lte?: number;
+  /** Friendly aliases for gte/lte. */
+  min?: number;
+  max?: number;
+  /** Applied to `equals` (default 0). */
+  tolerance?: number;
+}
+
+export type NumericExpectation = number | NumericMatcher;
+
+/**
+ * Cross-platform selector evaluated against the normalized accessibility tree.
+ *
+ * String shorthand is exact and case-insensitive. Legacy YAML string actions
+ * retain their existing fuzzy matching behavior and do not use this type.
+ */
+export interface ElementSelector {
+  text?: StringSelector;
+  id?: StringSelector;
+  accessibilityId?: StringSelector;
+  type?: StringSelector;
+  hint?: StringSelector;
+  value?: StringSelector;
+  /** Select one occurrence after all other filters and relations (0-based). */
+  index?: number;
+
+  enabled?: boolean;
+  checked?: boolean;
+  focused?: boolean;
+  selected?: boolean;
+  editable?: boolean;
+  clickable?: boolean;
+  scrollable?: boolean;
+  longClickable?: boolean;
+
+  above?: SelectorReference;
+  below?: SelectorReference;
+  leftOf?: SelectorReference;
+  rightOf?: SelectorReference;
+  near?: SelectorReference;
+  within?: SelectorReference;
+  childOf?: SelectorReference;
+  descendantOf?: SelectorReference;
+}
+
+/** A relation anchor may use text shorthand or another structured selector. */
+export type SelectorReference = string | ElementSelector;
+
+/** Properties checked after the target element(s) have been located. */
+export interface ElementPropertyExpectations {
+  exists?: boolean;
+  visible?: boolean;
+  text?: StringSelector;
+  value?: StringSelector;
+  type?: StringSelector;
+  enabled?: boolean;
+  checked?: boolean;
+  focused?: boolean;
+  selected?: boolean;
+  editable?: boolean;
+  clickable?: boolean;
+  scrollable?: boolean;
+  longClickable?: boolean;
+  width?: NumericExpectation;
+  height?: NumericExpectation;
+  x?: NumericExpectation;
+  y?: NumericExpectation;
+}
+
+/** Serializable element details attached to structured-selector reports. */
+export interface MatchedElementSnapshot {
+  text: string;
+  id: string;
+  accessibilityId: string;
+  type: string;
+  value?: string;
+  bounds: string;
+  center: [number, number];
+  size: [number, number];
+  enabled: boolean;
+  checked?: boolean;
+  focused?: boolean;
+  selected?: boolean;
+  editable: boolean;
+  clickable: boolean;
+  visible?: boolean;
+}
+
+/** Structured diagnostics persisted in run manifests and rendered in reports. */
+export interface SelectorDiagnostics {
+  selector: ElementSelector;
+  matchedCount: number;
+  matched: MatchedElementSnapshot[];
+  expectedProperties?: ElementPropertyExpectations;
+  expectedCount?: NumericExpectation;
+  failures?: string[];
+}
 
 /**
  * Spatial selectors for disambiguating which matching element to act on, modeled
@@ -86,12 +207,25 @@ export type FlowStep =
       kind: 'waitUntil';
       condition: 'visible' | 'gone' | 'screenLoaded';
       text?: string;
+      /** Structured targets are deterministic DOM/accessibility-tree only. */
+      selector?: ElementSelector;
       timeoutSeconds: number;
     } & Verbatim)
-  | ({ kind: 'tap'; label: string; proximity?: Proximity } & Verbatim)
-  | ({ kind: 'doubleTap'; label: string; proximity?: Proximity } & Verbatim)
-  | ({ kind: 'longPress'; label: string; duration?: number } & Verbatim)
-  | ({ kind: 'type'; text: string; target?: string; proximity?: Proximity } & Verbatim)
+  | ({ kind: 'tap'; label: string; selector?: ElementSelector; proximity?: Proximity } & Verbatim)
+  | ({
+      kind: 'doubleTap';
+      label: string;
+      selector?: ElementSelector;
+      proximity?: Proximity;
+    } & Verbatim)
+  | ({ kind: 'longPress'; label: string; selector?: ElementSelector; duration?: number } & Verbatim)
+  | ({
+      kind: 'type';
+      text: string;
+      target?: string;
+      selector?: ElementSelector;
+      proximity?: Proximity;
+    } & Verbatim)
   | ({ kind: 'enter' } & Verbatim)
   | ({ kind: 'back' } & Verbatim)
   | ({ kind: 'home' } & Verbatim)
@@ -105,6 +239,7 @@ export type FlowStep =
        * moves in `direction`. When omitted, swipes from the screen center.
        */
       target?: string;
+      selector?: ElementSelector;
     } & Verbatim)
   | ({
       kind: 'zoom';
@@ -112,6 +247,7 @@ export type FlowStep =
       scale: number;
       /** Optional label of the element to zoom on. If omitted, zooms on the center of the screen. */
       target?: string;
+      selector?: ElementSelector;
     } & Verbatim)
   | ({
       kind: 'drag';
@@ -122,10 +258,19 @@ export type FlowStep =
       /** Hold duration before dragging in ms. Default: 400 */
       longPressDuration?: number;
     } & Verbatim)
-  | ({ kind: 'assert'; text: string } & Verbatim)
+  | ({
+      kind: 'assert';
+      /** Legacy semantic/text assertion. */
+      text?: string;
+      /** Structured target; never silently falls back to vision. */
+      selector?: ElementSelector;
+      properties?: ElementPropertyExpectations;
+      count?: NumericExpectation;
+    } & Verbatim)
   | ({
       kind: 'scrollAssert';
-      text: string;
+      text?: string;
+      selector?: ElementSelector;
       direction: 'up' | 'down' | 'left' | 'right';
       maxScrolls: number;
       /**

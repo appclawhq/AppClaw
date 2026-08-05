@@ -43,6 +43,23 @@ describe('iOS XCUIElementTypeTextView inputs', () => {
     expect(resolveEditableForTarget(elements, 'kitchen-composer-text-input').el).toBe(input);
   });
 
+  test('can retain hidden nodes for exists versus visible assertions', () => {
+    const hiddenSource = krnComposerSource.replace(
+      'visible="true"\n      accessible="true"\n      x="35"',
+      'visible="false"\n      accessible="true"\n      x="35"'
+    );
+    expect(
+      parseIOSPageSource(hiddenSource).find(
+        (element) => element.id === 'kitchen-composer-text-input'
+      )
+    ).toBeUndefined();
+    expect(
+      parseIOSPageSource(hiddenSource, { includeHidden: true }).find(
+        (element) => element.id === 'kitchen-composer-text-input'
+      )
+    ).toMatchObject({ visible: false });
+  });
+
   test('DOM trimmer marks a TextView editable and includes it in editableCount', () => {
     const result = trimDOM(krnComposerSource, 'ios');
 

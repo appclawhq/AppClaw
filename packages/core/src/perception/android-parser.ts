@@ -22,18 +22,30 @@ export function parseAndroidPageSource(xmlContent: string): UIElement[] {
   }
 
   const elements: UIElement[] = [];
+  let treeSequence = 0;
 
-  function walk(node: any, parentLabel: string, depth: number): void {
+  function walk(
+    node: any,
+    parentLabel: string,
+    depth: number,
+    parentTreeId?: string,
+    ancestorTreeIds: string[] = []
+  ): void {
     if (!node || typeof node !== 'object') return;
 
     if (node['@_bounds']) {
+      const treeId = `android-${treeSequence++}`;
       const isClickable = node['@_clickable'] === 'true';
       const isLongClickable = node['@_long-clickable'] === 'true';
       const isScrollable = node['@_scrollable'] === 'true';
       const isEnabled = node['@_enabled'] !== 'false';
-      const isChecked = node['@_checked'] === 'true';
-      const isFocused = node['@_focused'] === 'true';
-      const isSelected = node['@_selected'] === 'true';
+      const isCheckable =
+        node['@_checkable'] === 'true' ||
+        /Switch|CheckBox|RadioButton/i.test(node['@_class'] ?? '');
+      const isChecked = isCheckable ? node['@_checked'] === 'true' : undefined;
+      const isFocused = node['@_focused'] == null ? undefined : node['@_focused'] === 'true';
+      const isSelected = node['@_selected'] == null ? undefined : node['@_selected'] === 'true';
+      const isVisible = node['@_displayed'] == null ? true : node['@_displayed'] !== 'false';
 
       const elementClass: string = node['@_class'] ?? '';
       const isEditable =
@@ -45,6 +57,7 @@ export function parseAndroidPageSource(xmlContent: string): UIElement[] {
       const desc: string = node['@_content-desc'] ?? '';
       const resourceId: string = node['@_resource-id'] ?? '';
       const hint: string = node['@_hint'] ?? '';
+      const isPassword = node['@_password'] === 'true';
 
       const typeName = elementClass.split('.').pop() ?? '';
       const nodeLabel = text || desc || resourceId.split('/').pop() || typeName;
@@ -81,6 +94,7 @@ export function parseAndroidPageSource(xmlContent: string): UIElement[] {
               id: resourceId,
               accessibilityId: desc || resourceId.split('/').pop() || '',
               text: text || desc,
+              ...(isEditable && text ? { value: text } : {}),
               type: typeName,
               bounds,
               center: [centerX, centerY],
@@ -91,12 +105,17 @@ export function parseAndroidPageSource(xmlContent: string): UIElement[] {
               checked: isChecked,
               focused: isFocused,
               selected: isSelected,
+              visible: isVisible,
+              password: isPassword,
               scrollable: isScrollable,
               longClickable: isLongClickable,
               hint,
               action: suggestedAction,
               parent: parentLabel,
               depth,
+              treeId,
+              ...(parentTreeId ? { parentTreeId } : {}),
+              ancestorTreeIds,
               platform: 'android',
             });
           }
@@ -105,22 +124,28 @@ export function parseAndroidPageSource(xmlContent: string): UIElement[] {
         }
       }
 
-      walkChildren(node, nodeLabel, depth + 1);
+      walkChildren(node, nodeLabel, depth + 1, treeId, [...ancestorTreeIds, treeId]);
       return;
     }
 
-    walkChildren(node, parentLabel, depth);
+    walkChildren(node, parentLabel, depth, parentTreeId, ancestorTreeIds);
   }
 
-  function walkChildren(node: any, parentLabel: string, depth: number): void {
+  function walkChildren(
+    node: any,
+    parentLabel: string,
+    depth: number,
+    parentTreeId?: string,
+    ancestorTreeIds: string[] = []
+  ): void {
     // Appium page source nests children directly as element type keys
     for (const key of Object.keys(node)) {
       if (key.startsWith('@_')) continue; // skip attributes
       const child = node[key];
       if (Array.isArray(child)) {
-        for (const item of child) walk(item, parentLabel, depth);
+        for (const item of child) walk(item, parentLabel, depth, parentTreeId, ancestorTreeIds);
       } else if (typeof child === 'object' && child !== null) {
-        walk(child, parentLabel, depth);
+        walk(child, parentLabel, depth, parentTreeId, ancestorTreeIds);
       }
     }
   }

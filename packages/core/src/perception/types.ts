@@ -6,6 +6,8 @@ export interface UIElement {
   accessibilityId: string;
   /** Visible text (text/content-desc on Android, label on iOS) */
   text: string;
+  /** Current control value, kept separate from its label when exposed by the platform. */
+  value?: string;
   /** Element class name (e.g. "Button", "XCUIElementTypeButton") */
   type: string;
   /** Raw bounds string */
@@ -17,9 +19,14 @@ export interface UIElement {
   clickable: boolean;
   editable: boolean;
   enabled: boolean;
-  checked: boolean;
-  focused: boolean;
-  selected: boolean;
+  /** Optional state means the platform/control did not expose that property. */
+  checked?: boolean;
+  focused?: boolean;
+  selected?: boolean;
+  /** Whether the platform reports the node as displayed. */
+  visible?: boolean;
+  /** Secure inputs mask their value in selector diagnostics. */
+  password?: boolean;
   scrollable: boolean;
   longClickable: boolean;
   /** Hint/placeholder text */
@@ -30,6 +37,10 @@ export interface UIElement {
   parent: string;
   /** Depth in the element tree */
   depth: number;
+  /** Stable within a single page-source snapshot; used for tree relations. */
+  treeId?: string;
+  parentTreeId?: string;
+  ancestorTreeIds?: string[];
   /** Source platform */
   platform: 'android' | 'ios';
 }

@@ -25,6 +25,7 @@ import type {
   HookRecord,
 } from './types.js';
 import type { FlowMeta, FlowPhase } from '../flow/types.js';
+import type { SelectorDiagnostics } from '../flow/types.js';
 import type { RunYamlFlowResult } from '../flow/run-yaml-flow.js';
 
 /* ─── Helpers ────────────────────────────────────────────── */
@@ -93,6 +94,7 @@ export interface StepCollectorEntry {
    * users can see hit-rate during rollout.
    */
   cacheHit?: boolean;
+  selectorDiagnostics?: SelectorDiagnostics;
 }
 
 /**
@@ -236,6 +238,7 @@ export class RunArtifactCollector {
         screenshotSize: step.screenshotSize,
         videoOffsetMs: step.videoOffsetMs,
         cacheHit: step.cacheHit,
+        selectorDiagnostics: step.selectorDiagnostics,
       });
     }
 
