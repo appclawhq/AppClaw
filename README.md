@@ -41,7 +41,15 @@ npm install -g @appclaw/cli
 appclaw "open the settings app and turn on airplane mode"
 ```
 
-You'll need **Node.js 22+**, a connected device / emulator / simulator, and an **LLM API key** (Anthropic, OpenAI, Google, Groq, or local Ollama). Full setup → **[appclaw.in](https://appclaw.in)**.
+The natural-language Agent mode command above needs **Node.js 22+**, a connected device / emulator /
+simulator, and an **LLM API key** (Anthropic, OpenAI, Google, Groq, or local Ollama).
+
+Deterministic YAML flows do not need an LLM API key when strict parsing, DOM-only interaction, and
+disabled vision fallback are used together. See the
+**[secret-free Android and iOS GitHub Actions example](github-action/examples/deterministic-flow.yml)**
+and the **[GitHub Action guide](github-action/README.md#deterministic-yaml-flow--no-llm-secret)**.
+
+Full setup → **[appclaw.in](https://appclaw.in)**.
 
 ## What it can do
 
