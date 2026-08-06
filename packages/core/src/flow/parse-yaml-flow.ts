@@ -157,6 +157,7 @@ export function normalizeStructured(raw: unknown, index: number): FlowStep | nul
         text,
         direction: dir as 'up' | 'down' | 'left' | 'right',
         maxScrolls,
+        ...(o.target != null && o.target !== '' ? { target: String(o.target) } : {}),
       };
     }
 

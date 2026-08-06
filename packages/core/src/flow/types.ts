@@ -128,6 +128,12 @@ export type FlowStep =
       text: string;
       direction: 'up' | 'down' | 'left' | 'right';
       maxScrolls: number;
+      /**
+       * Optional anchor element: the swipe gesture starts from this element's
+       * position (e.g. inside a horizontal carousel) instead of screen center.
+       * Resolved once — the anchor itself may scroll away; its coordinates stay.
+       */
+      target?: string;
     } & Verbatim)
   | ({ kind: 'getInfo'; query: string } & Verbatim)
   | ({ kind: 'done'; message?: string } & Verbatim);

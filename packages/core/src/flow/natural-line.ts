@@ -251,15 +251,27 @@ export function tryParseNaturalFlowLine(line: string): FlowStep | null {
   }
 
   // scroll down until "X" is visible / scroll down 3 times to find "X"
+  // Anchored form: "swipe the FII/DII left until Goal calculator is visible" —
+  // the optional element between the verb and the direction anchors the gesture
+  // inside that element's container (a carousel/strip) instead of screen center.
   // MUST come before the simple swipe/scroll match to avoid premature matching
   const scrollAssertMatch = t.match(
-    /^scroll\s+(up|down|left|right)\s+(?:(\d+)\s+times?\s+)?(?:until|to\s+(?:find|see|check|verify))\s+["']?(.+?)["']?\s*(?:is\s+(?:visible|present|shown|displayed|seen|found|there))?$/i
+    /^(?:scroll|swipe)\s+(?:(?:the\s+)?(.+?)\s+)?(up|down|left|right)\s+(?:(\d+)\s+times?\s+)?(?:until|to\s+(?:find|see|check|verify))\s+["']?(.+?)["']?\s*(?:is\s+(?:visible|present|shown|displayed|seen|found|there))?$/i
   );
   if (scrollAssertMatch) {
-    const direction = scrollAssertMatch[1].toLowerCase() as 'up' | 'down' | 'left' | 'right';
-    const maxScrolls = scrollAssertMatch[2] ? Number(scrollAssertMatch[2]) : 3;
-    const text = stripTextPrefix(trimPunct(scrollAssertMatch[3].trim()));
-    if (text) return { kind: 'scrollAssert', text, direction, maxScrolls, verbatim };
+    const target = scrollAssertMatch[1] ? trimPunct(scrollAssertMatch[1].trim()) : undefined;
+    const direction = scrollAssertMatch[2].toLowerCase() as 'up' | 'down' | 'left' | 'right';
+    const maxScrolls = scrollAssertMatch[3] ? Number(scrollAssertMatch[3]) : 3;
+    const text = stripTextPrefix(trimPunct(scrollAssertMatch[4].trim()));
+    if (text)
+      return {
+        kind: 'scrollAssert',
+        text,
+        direction,
+        maxScrolls,
+        ...(target ? { target } : {}),
+        verbatim,
+      };
   }
 
   // "drag X to Y" / "slide X to Y" / "move X to Y"

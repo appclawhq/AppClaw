@@ -96,7 +96,7 @@ export function stepTarget(step: FlowStep): string {
     case 'assert':
       return `"${step.text}"`;
     case 'scrollAssert':
-      return `"${step.text}" ${step.direction} ×${step.maxScrolls}`;
+      return `"${step.text}" ${step.direction} ×${step.maxScrolls}${step.target ? ` on "${step.target}"` : ''}`;
     case 'drag':
       return `"${step.from}" → "${step.to}"`;
     case 'getInfo':

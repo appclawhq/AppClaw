@@ -502,3 +502,39 @@ describe('natural-line: double tap', () => {
     expect(tryParseNaturalFlowLine('tap Photo')).toMatchObject({ kind: 'tap', label: 'Photo' });
   });
 });
+
+describe('natural-line: anchored scrollAssert', () => {
+  test('swipe the <anchor> left until <text> is visible', () => {
+    expect(
+      tryParseNaturalFlowLine('swipe the FII/DII left until Goal calculator is visible')
+    ).toMatchObject({
+      kind: 'scrollAssert',
+      target: 'FII/DII',
+      direction: 'left',
+      text: 'Goal calculator',
+      maxScrolls: 3,
+    });
+  });
+  test('anchored form with an explicit count', () => {
+    expect(
+      tryParseNaturalFlowLine('swipe the FII/DII left 5 times until Goal calculator is visible')
+    ).toMatchObject({ kind: 'scrollAssert', target: 'FII/DII', maxScrolls: 5 });
+  });
+  test('plain scroll-until keeps working without a target', () => {
+    const r = tryParseNaturalFlowLine('scroll down until Checkout is visible');
+    expect(r).toMatchObject({ kind: 'scrollAssert', direction: 'down', text: 'Checkout' });
+    expect(r && 'target' in r ? r.target : undefined).toBeUndefined();
+  });
+  test('swipe verb without a target parses too', () => {
+    const r = tryParseNaturalFlowLine('swipe left until Reviews is visible');
+    expect(r).toMatchObject({ kind: 'scrollAssert', direction: 'left', text: 'Reviews' });
+    expect(r && 'target' in r ? r.target : undefined).toBeUndefined();
+  });
+  test('anchored swipe WITHOUT until stays a plain swipe step', () => {
+    expect(tryParseNaturalFlowLine('swipe the FII/DII left')).toMatchObject({
+      kind: 'swipe',
+      direction: 'left',
+      target: 'FII/DII',
+    });
+  });
+});

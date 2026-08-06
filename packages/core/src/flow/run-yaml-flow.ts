@@ -322,7 +322,7 @@ function stepLabel(step: FlowStep): string {
     case 'assert':
       return `assert "${step.text}"`;
     case 'scrollAssert':
-      return `scroll ${step.direction} until "${step.text}"`;
+      return `scroll ${step.direction} until "${step.text}"${step.target ? ` (on "${step.target}")` : ''}`;
     case 'getInfo':
       return `getInfo "${step.query.length > 50 ? `${step.query.slice(0, 47)}…` : step.query}"`;
     case 'done':
@@ -1784,11 +1784,32 @@ async function scrollUntilVisible(
   direction: 'up' | 'down' | 'left' | 'right',
   maxScrolls: number,
   poll: FlowTapPollOptions,
-  distance?: ScrollDistance
+  distance?: ScrollDistance,
+  target?: string
 ): Promise<ActionResult> {
-  const customCoords = distance ? scrollCoordsForDistance(mcp, direction, distance) : null;
   const visionFirst = isVisionMode();
   const useVision = isVisionLocateEnabled();
+
+  // Anchored form: swipe from the named element's position (a carousel/strip)
+  // instead of screen center. Resolved ONCE, before any swiping — the anchor
+  // element itself scrolls away with the strip's content, but the strip stays
+  // where it is on screen, so the first-seen coordinates remain the right
+  // place to keep swiping. Finger-motion semantics, same as anchored `swipe`.
+  let anchorCoords: { x: number; y: number; endX: number; endY: number } | null = null;
+  if (target) {
+    const center = await resolveTargetCenter(mcp, target);
+    if (center) {
+      anchorCoords = anchoredSwipeCoords(mcp, center, direction, distance);
+    } else {
+      ui.printAgentBullet(`"${target}" not found — scrolling ${direction} from screen center`);
+    }
+  }
+  const customCoords =
+    anchorCoords ?? (distance ? scrollCoordsForDistance(mcp, direction, distance) : null);
+  // Anchored horizontal drags use the swipe gesture, mirroring the anchored
+  // `swipe` step; the plain path keeps its historical scroll semantics.
+  const gestureAction =
+    anchorCoords && (direction === 'left' || direction === 'right') ? 'swipe' : 'scroll';
 
   // Helper: check if text is currently visible on screen
   const isVisible = async (): Promise<boolean> => {
@@ -1811,9 +1832,10 @@ async function scrollUntilVisible(
     };
   }
 
+  const onNote = anchorCoords ? ` on "${target}"` : '';
   for (let scroll = 0; scroll < maxScrolls; scroll++) {
     await mcp.callTool('appium_gesture', {
-      action: 'scroll',
+      action: gestureAction,
       ...(customCoords ? customCoords : { direction }),
     });
     await sleep(800);
@@ -1821,7 +1843,7 @@ async function scrollUntilVisible(
     if (await isVisible()) {
       return {
         success: true,
-        message: `Found "${text}" after ${scroll + 1} scroll(s) ${direction}`,
+        message: `Found "${text}" after ${scroll + 1} scroll(s) ${direction}${onNote}`,
       };
     }
   }
@@ -1841,7 +1863,7 @@ async function scrollUntilVisible(
 
   return {
     success: false,
-    message: `"${text}" not found after ${maxScrolls} scroll(s) ${direction}${screenSummary}`,
+    message: `"${text}" not found after ${maxScrolls} scroll(s) ${direction}${onNote}${screenSummary}`,
   };
 }
 
@@ -2326,7 +2348,8 @@ export async function executeStep(
         step.direction,
         scroll?.times ?? step.maxScrolls,
         tapPoll,
-        scroll?.distance
+        scroll?.distance,
+        step.target
       );
     case 'getInfo': {
       const infoApiKey = getStarkVisionApiKey();
