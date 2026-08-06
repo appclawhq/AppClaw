@@ -91,7 +91,20 @@ const stepSchema = z.discriminatedUnion('kind', [
       .string()
       .optional()
       .describe(
-        'Anchor element to swipe from (e.g. an item inside a horizontal carousel) instead of screen center'
+        'Anchor element to swipe from (e.g. an item inside a horizontal carousel) instead of ' +
+          'screen center. Generic region nouns ("area", "section") are allowed when combined ' +
+          'with targetProximity'
+      ),
+    targetProximity: z
+      .object({
+        relation: z.enum(['above', 'below', 'toLeftOf', 'toRightOf', 'near', 'within']),
+        anchor: z.string(),
+      })
+      .optional()
+      .describe(
+        'Spatial qualifier picking WHICH scroll area, e.g. "swipe left inside the area above ' +
+          'View All until X visible" → target "area", targetProximity {relation: "above", ' +
+          'anchor: "View All"}'
       ),
   }),
   z.object({

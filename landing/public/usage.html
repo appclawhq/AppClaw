@@ -2208,9 +2208,21 @@
           <div class="code-block">
             <div class="code-block-header">
               <div class="code-block-dots"><span></span><span></span><span></span></div>
+              <span class="code-block-label">Double tap</span>
+            </div>
+            <pre><span class="c"># Same matching as tap, fires a double-tap gesture</span>
+<span class="p">-</span> double tap the Photo
+<span class="p">-</span> double-click on the image
+<span class="p">-</span> double tap YESBANK to the left of BSE</pre>
+          </div>
+
+          <div class="code-block">
+            <div class="code-block-header">
+              <div class="code-block-dots"><span></span><span></span><span></span></div>
               <span class="code-block-label">Structured YAML</span>
             </div>
-            <pre><span class="p">-</span> <span class="k">tap</span><span class="p">:</span> <span class="s">"Login Button"</span></pre>
+            <pre><span class="p">-</span> <span class="k">tap</span><span class="p">:</span> <span class="s">"Login Button"</span>
+<span class="p">-</span> <span class="k">doubleTap</span><span class="p">:</span> <span class="s">"Photo"</span></pre>
           </div>
         </section>
 
@@ -2220,7 +2232,9 @@
             When several elements share the same label &mdash; e.g. a &ldquo;Login&rdquo; tab, a
             &ldquo;Login&rdquo; nav item, and the actual <code>LOGIN</code> button &mdash; add a
             spatial qualifier to pick the right one by its position relative to another element.
-            Works on both <code>tap</code> and <code>type</code>.
+            Works on <code>tap</code>, <code>doubleTap</code>, <code>type</code>, and scroll-area
+            anchors (see Scroll / Swipe). Qualifiers chain when the anchor itself needs picking:
+            <code>tap YESBANK to the left of NSEFO which is near &#8377;0.04</code>.
           </p>
 
           <div class="code-block">
@@ -2453,10 +2467,44 @@
           <div class="code-block">
             <div class="code-block-header">
               <div class="code-block-dots"><span></span><span></span><span></span></div>
+              <span class="code-block-label">Anchored swipe — inside a carousel / strip</span>
+            </div>
+            <pre><span class="c"># Start the gesture from a named element instead of screen center,</span>
+<span class="c"># so a horizontal rail scrolls instead of the page</span>
+<span class="p">-</span> swipe the FII/DII left
+<span class="p">-</span> swipe the FII/DII left 2 times</pre>
+          </div>
+
+          <div class="code-block">
+            <div class="code-block-header">
+              <div class="code-block-dots"><span></span><span></span><span></span></div>
+              <span class="code-block-label">Swipe a carousel until an element appears</span>
+            </div>
+            <pre><span class="c"># Keep swiping inside the strip until the element shows up.</span>
+<span class="c"># The anchor is resolved once &mdash; it may scroll away; its spot stays.</span>
+<span class="p">-</span> swipe the FII/DII left until <span class="s">"Goal calculator"</span> is visible
+
+<span class="c"># Several scroll areas? Qualify WHICH one spatially:</span>
+<span class="p">-</span> swipe the FII/DII below <span class="s">"Post-Market Insights"</span> left until <span class="s">"Goal calculator"</span> is visible
+
+<span class="c"># Or describe the region itself &mdash; no element text needed.</span>
+<span class="c"># "area/section/strip" resolves to the nearest element on that side:</span>
+<span class="p">-</span> swipe left inside the area above <span class="s">"View All"</span> until <span class="s">"Goal calculator"</span> is visible</pre>
+          </div>
+
+          <div class="code-block">
+            <div class="code-block-header">
+              <div class="code-block-dots"><span></span><span></span><span></span></div>
               <span class="code-block-label">Structured YAML</span>
             </div>
             <pre><span class="p">-</span> <span class="k">scrollAssert</span><span class="p">:</span> <span class="s">"Terms &amp; Conditions"</span>
   <span class="k">direction</span><span class="p">:</span> <span class="s">down</span>
+  <span class="k">maxScrolls</span><span class="p">:</span> <span class="n">5</span>
+
+<span class="c"># Anchored inside a carousel</span>
+<span class="p">-</span> <span class="k">scrollAssert</span><span class="p">:</span> <span class="s">"Goal calculator"</span>
+  <span class="k">direction</span><span class="p">:</span> <span class="s">left</span>
+  <span class="k">target</span><span class="p">:</span> <span class="s">"FII/DII"</span>
   <span class="k">maxScrolls</span><span class="p">:</span> <span class="n">5</span></pre>
           </div>
         </section>
@@ -2601,6 +2649,11 @@
                 <td>Tap element by visible text/label</td>
               </tr>
               <tr>
+                <td>doubleTap</td>
+                <td>label</td>
+                <td>Double-tap element by visible text/label</td>
+              </tr>
+              <tr>
                 <td>type</td>
                 <td>text, target?</td>
                 <td>Type text, optionally into a named field</td>
@@ -2632,8 +2685,8 @@
               </tr>
               <tr>
                 <td>swipe</td>
-                <td>direction, repeat?</td>
-                <td>Swipe up/down/left/right</td>
+                <td>direction, target?, repeat?</td>
+                <td>Swipe up/down/left/right; target anchors the gesture on an element</td>
               </tr>
               <tr>
                 <td>drag</td>
@@ -2647,8 +2700,8 @@
               </tr>
               <tr>
                 <td>scrollAssert</td>
-                <td>text, direction, maxScrolls</td>
-                <td>Scroll until text found</td>
+                <td>text, direction, maxScrolls, target?</td>
+                <td>Scroll until text found; target (plus an optional spatial qualifier) anchors the swipes inside a carousel</td>
               </tr>
               <tr>
                 <td>getInfo</td>

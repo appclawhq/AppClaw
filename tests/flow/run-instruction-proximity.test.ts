@@ -270,6 +270,7 @@ describe('runOneInstruction: anchored scroll-until-visible', () => {
           `<android.widget.TextView class="android.widget.TextView" text="${label}" clickable="true" enabled="true" bounds="[${40 + i * 210},1400][${210 + i * 210},1460]" />`
       )
       .join('\n    ')}
+    <android.widget.TextView class="android.widget.TextView" text="View All" clickable="true" enabled="true" bounds="[850,1600][1010,1650]" />
   </android.widget.FrameLayout>
 </hierarchy>`;
 
@@ -317,6 +318,33 @@ describe('runOneInstruction: anchored scroll-until-visible', () => {
       // both swipes, including the one AFTER the icon left the page source.
       expect(s.args).toMatchObject({ x: 125, y: 1430 });
       expect(s.args.endX as number).toBeLessThan(125 + 1);
+      expect(s.args.endY).toBe(1430);
+    }
+  }, 15000);
+
+  test('region form: "swipe left inside the area above View All until …" swipes at the strip', async () => {
+    // "area" is not a real element — the region is defined by the qualifier:
+    // resolve "View All", then swipe from the nearest element ABOVE it (the
+    // 'smallcase' icon at 755,1430 — inside the strip).
+    const { step, result } = await runOneInstruction(
+      stripMcp(),
+      'swipe left inside the area above View All until Goal calculator is visible'
+    );
+    expect(step).toMatchObject({
+      kind: 'scrollAssert',
+      direction: 'left',
+      target: 'area',
+      targetProximity: { relation: 'above', anchor: 'View All' },
+      text: 'Goal calculator',
+    });
+    expect(result.success).toBe(true);
+    expect(result.message).toContain('on "area above \"View All\""');
+
+    const swipes = calls.filter((c) => c.name === 'appium_gesture' && c.args.action === 'swipe');
+    expect(swipes).toHaveLength(2);
+    for (const s of swipes) {
+      expect(s.args).toMatchObject({ x: 755, y: 1430 });
+      expect(s.args.endX as number).toBeLessThan(755 + 1);
       expect(s.args.endY).toBe(1430);
     }
   }, 15000);

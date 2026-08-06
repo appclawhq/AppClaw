@@ -1778,6 +1778,39 @@ async function assertTextVisible(
  * Checks the current screen BEFORE the first scroll — if the target is already
  * visible, returns immediately without scrolling (avoids pushing it off screen).
  */
+/** Generic region nouns in phrases like "the area above View All" — no element
+ *  carries this text; the region is defined purely by the spatial qualifier. */
+const GENERIC_REGION_NOUN =
+  /^(?:area|section|carousel|strip|list|row|region|scroll\s*(?:area|view|section))$/i;
+
+/**
+ * Resolve where an anchored scroll-until-visible should swipe.
+ *
+ * - target only               → the element's center (same as anchored swipe)
+ * - target + qualifier        → the spatially-disambiguated instance's center
+ * - generic noun + qualifier  → the nearest element on that side of the
+ *   qualifier's anchor ("the area above View All" → whatever sits just above
+ *   "View All"), guaranteeing the point lands on real content in that region.
+ */
+async function resolveScrollAnchorCenter(
+  mcp: MCPClient,
+  target: string | undefined,
+  proximity: Proximity | undefined
+): Promise<[number, number] | null> {
+  if (!proximity) return target ? resolveTargetCenter(mcp, target) : null;
+  const pageSource = await getPageSource(mcp);
+  const platform = detectPlatform(pageSource);
+  const elements =
+    platform === 'android' ? parseAndroidPageSource(pageSource) : parseIOSPageSource(pageSource);
+  if (!target || GENERIC_REGION_NOUN.test(target)) {
+    const anchorEl = resolveAnchor(elements, proximity);
+    if (!anchorEl) return null;
+    const ranked = rankBySpatial(elements, anchorEl, proximity.relation);
+    return ranked[0]?.center ?? null;
+  }
+  return resolveTapTarget(elements, target, proximity).el?.center ?? null;
+}
+
 async function scrollUntilVisible(
   mcp: MCPClient,
   text: string,
@@ -1785,7 +1818,8 @@ async function scrollUntilVisible(
   maxScrolls: number,
   poll: FlowTapPollOptions,
   distance?: ScrollDistance,
-  target?: string
+  target?: string,
+  targetProximity?: Proximity
 ): Promise<ActionResult> {
   const visionFirst = isVisionMode();
   const useVision = isVisionLocateEnabled();
@@ -1796,12 +1830,15 @@ async function scrollUntilVisible(
   // where it is on screen, so the first-seen coordinates remain the right
   // place to keep swiping. Finger-motion semantics, same as anchored `swipe`.
   let anchorCoords: { x: number; y: number; endX: number; endY: number } | null = null;
-  if (target) {
-    const center = await resolveTargetCenter(mcp, target);
+  const targetDesc = targetProximity
+    ? `${target ?? 'area'} ${relationPhrase(targetProximity.relation)} ${describeAnchor(targetProximity)}`
+    : target;
+  if (target || targetProximity) {
+    const center = await resolveScrollAnchorCenter(mcp, target, targetProximity);
     if (center) {
       anchorCoords = anchoredSwipeCoords(mcp, center, direction, distance);
     } else {
-      ui.printAgentBullet(`"${target}" not found — scrolling ${direction} from screen center`);
+      ui.printAgentBullet(`"${targetDesc}" not found — scrolling ${direction} from screen center`);
     }
   }
   const customCoords =
@@ -1832,7 +1869,7 @@ async function scrollUntilVisible(
     };
   }
 
-  const onNote = anchorCoords ? ` on "${target}"` : '';
+  const onNote = anchorCoords ? ` on "${targetDesc}"` : '';
   for (let scroll = 0; scroll < maxScrolls; scroll++) {
     await mcp.callTool('appium_gesture', {
       action: gestureAction,
@@ -2349,7 +2386,8 @@ export async function executeStep(
         scroll?.times ?? step.maxScrolls,
         tapPoll,
         scroll?.distance,
-        step.target
+        step.target,
+        step.targetProximity
       );
     case 'getInfo': {
       const infoApiKey = getStarkVisionApiKey();

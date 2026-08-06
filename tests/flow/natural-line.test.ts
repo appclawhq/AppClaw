@@ -538,3 +538,48 @@ describe('natural-line: anchored scrollAssert', () => {
     });
   });
 });
+
+describe('natural-line: spatially-qualified scroll areas', () => {
+  test('direction-first region form: "swipe left inside the area above View All until …"', () => {
+    expect(
+      tryParseNaturalFlowLine(
+        'swipe left inside the area above View All until Goal calculator is visible'
+      )
+    ).toMatchObject({
+      kind: 'scrollAssert',
+      direction: 'left',
+      target: 'area',
+      targetProximity: { relation: 'above', anchor: 'View All' },
+      text: 'Goal calculator',
+    });
+  });
+  test('connector filler is stripped: "…the area that is located above View All…"', () => {
+    expect(
+      tryParseNaturalFlowLine(
+        'swipe left inside the area that is located above View All until Goal calculator is visible'
+      )
+    ).toMatchObject({
+      kind: 'scrollAssert',
+      target: 'area',
+      targetProximity: { relation: 'above', anchor: 'View All' },
+    });
+  });
+  test('qualified labeled target: "swipe the FII/DII below Post-Market Insights left until …"', () => {
+    expect(
+      tryParseNaturalFlowLine(
+        'swipe the FII/DII below Post-Market Insights left until Goal calculator is visible'
+      )
+    ).toMatchObject({
+      kind: 'scrollAssert',
+      direction: 'left',
+      target: 'FII/DII',
+      targetProximity: { relation: 'below', anchor: 'Post-Market Insights' },
+      text: 'Goal calculator',
+    });
+  });
+  test('unqualified anchored form still has no targetProximity', () => {
+    const r = tryParseNaturalFlowLine('swipe the FII/DII left until Goal calculator is visible');
+    expect(r).toMatchObject({ kind: 'scrollAssert', target: 'FII/DII' });
+    expect(r && 'targetProximity' in r ? r.targetProximity : undefined).toBeUndefined();
+  });
+});
