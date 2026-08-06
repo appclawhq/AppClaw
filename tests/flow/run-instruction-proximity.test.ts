@@ -253,3 +253,71 @@ describe('runOneInstruction: double tap', () => {
     expect(doubleTaps()[0].args).toHaveProperty('elementUUID');
   });
 });
+
+// Anchored scroll-until-visible: a horizontal icon strip (FII/DII, Indices, …)
+// low on the screen. "Goal calculator" is off the right edge and only enters
+// the page source after two strip swipes. The gesture must be anchored at the
+// strip (the FII/DII icon's position), not the screen center — and must KEEP
+// using those coordinates even after the FII/DII icon itself scrolls away.
+describe('runOneInstruction: anchored scroll-until-visible', () => {
+  const stripXml = (icons: string[]) => `<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>
+<hierarchy rotation="0">
+  <android.widget.FrameLayout class="android.widget.FrameLayout" bounds="[0,0][1080,2400]" clickable="false" enabled="true">
+    <android.widget.TextView class="android.widget.TextView" text="Post-Market Insights" clickable="false" enabled="true" bounds="[40,700][560,760]" />
+    ${icons
+      .map(
+        (label, i) =>
+          `<android.widget.TextView class="android.widget.TextView" text="${label}" clickable="true" enabled="true" bounds="[${40 + i * 210},1400][${210 + i * 210},1460]" />`
+      )
+      .join('\n    ')}
+  </android.widget.FrameLayout>
+</hierarchy>`;
+
+  function stripMcp(): MCPClient {
+    let swipes = 0;
+    return {
+      callTool: vi.fn(async (name: string, args: Record<string, unknown> = {}) => {
+        calls.push({ name, args });
+        if (name === 'appium_gesture' && (args.action === 'swipe' || args.action === 'scroll')) {
+          swipes++;
+        }
+        if (name === 'appium_get_page_source') {
+          const icons =
+            swipes >= 2
+              ? ['smallcase', 'Launchpad', 'Goal calculator']
+              : ['FII/DII', 'Indices', 'Trade Easy', 'smallcase'];
+          return { content: [{ type: 'text' as const, text: stripXml(icons) }] };
+        }
+        return { content: [{ type: 'text' as const, text: 'OK' }] };
+      }),
+      listTools: vi.fn(async () => []),
+      close: vi.fn(async () => {}),
+    } as unknown as MCPClient;
+  }
+
+  test('"swipe the FII/DII left until Goal calculator is visible" swipes at the strip', async () => {
+    const { step, result } = await runOneInstruction(
+      stripMcp(),
+      'swipe the FII/DII left until Goal calculator is visible'
+    );
+    expect(step).toMatchObject({
+      kind: 'scrollAssert',
+      target: 'FII/DII',
+      direction: 'left',
+      text: 'Goal calculator',
+    });
+    expect(result.success).toBe(true);
+    expect(result.message).toContain('Goal calculator');
+    expect(result.message).toContain('on "FII/DII"');
+
+    const swipes = calls.filter((c) => c.name === 'appium_gesture' && c.args.action === 'swipe');
+    expect(swipes).toHaveLength(2);
+    for (const s of swipes) {
+      // Anchored at the FII/DII icon center (125, 1430), finger moving left —
+      // both swipes, including the one AFTER the icon left the page source.
+      expect(s.args).toMatchObject({ x: 125, y: 1430 });
+      expect(s.args.endX as number).toBeLessThan(125 + 1);
+      expect(s.args.endY).toBe(1430);
+    }
+  }, 15000);
+});

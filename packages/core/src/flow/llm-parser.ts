@@ -87,6 +87,12 @@ const stepSchema = z.discriminatedUnion('kind', [
     text: z.string(),
     direction: z.enum(['up', 'down', 'left', 'right']),
     maxScrolls: z.number(),
+    target: z
+      .string()
+      .optional()
+      .describe(
+        'Anchor element to swipe from (e.g. an item inside a horizontal carousel) instead of screen center'
+      ),
   }),
   z.object({
     kind: z.literal('drag'),
@@ -127,7 +133,8 @@ const SYSTEM_PROMPT =
   `- "zoom in [Nx] [on/into/the <element>]" → zoom (scale > 1), "zoom out [on <element>]" → zoom (scale < 1). e.g. "zoom in the map", "zoom in 2x on the image"\n` +
   `- "pinch in/out [on/into/the <element>]" → zoom\n` +
   `- "verify/check/assert <text>" → assert\n` +
-  `- "scroll until <text> visible" → scrollAssert\n` +
+  `- "scroll until <text> visible" → scrollAssert ` +
+  `(swiping inside a named carousel — "swipe the <item> left until <text> visible" — sets target=<item>)\n` +
   `- "go back" → back, "go home" → home\n` +
   `- "press enter/submit/search" → enter\n` +
   `- "done" → done\n` +
