@@ -583,3 +583,31 @@ describe('natural-line: spatially-qualified scroll areas', () => {
     expect(r && 'targetProximity' in r ? r.targetProximity : undefined).toBeUndefined();
   });
 });
+
+describe('natural-line: participle labels are not mangled by connector stripping', () => {
+  test('"Order Placed" survives as a proximity target', () => {
+    expect(tryParseNaturalFlowLine('tap Order Placed below Filters')).toMatchObject({
+      kind: 'tap',
+      label: 'Order Placed',
+      proximity: { relation: 'below', anchor: 'Filters' },
+    });
+  });
+  test('"Conveniently Located" survives too', () => {
+    expect(tryParseNaturalFlowLine('tap Conveniently Located near the map')).toMatchObject({
+      kind: 'tap',
+      label: 'Conveniently Located',
+      proximity: { relation: 'near', anchor: 'map' },
+    });
+  });
+  test('bare participle IS stripped after a generic region noun', () => {
+    expect(
+      tryParseNaturalFlowLine(
+        'swipe left inside the area located above View All until Goal calculator is visible'
+      )
+    ).toMatchObject({
+      kind: 'scrollAssert',
+      target: 'area',
+      targetProximity: { relation: 'above', anchor: 'View All' },
+    });
+  });
+});

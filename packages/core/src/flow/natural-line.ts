@@ -57,12 +57,16 @@ export function splitProximity(label: string): { label: string; proximity?: Prox
   if (!m) return { label };
   // A trailing connector on the target means the relation opens a qualifier
   // clause: "YESBANK which is to the left of BSE" → target "YESBANK".
-  // Strip trailing connector filler ("which is", "that is located", "located")
-  // left behind when the relation opens a qualifier clause.
-  const target = trimPunct(m[1].trim()).replace(
-    /\s+(?:(?:which|that)\s+is\s*)?(?:located|positioned|placed|situated)?$/i,
-    ''
-  );
+  // Strip trailing connector filler: "which is" / "that is [located]" always;
+  // a BARE participle only after a generic region noun ("the area located
+  // above X" → "area"). A bare participle after a real label is kept —
+  // "Order Placed below Filters" must NOT become "Order".
+  const target = trimPunct(m[1].trim())
+    .replace(/\s+(?:which|that)\s+is(?:\s+(?:located|positioned|placed|situated))?$/i, '')
+    .replace(
+      /^((?:the\s+)?(?:area|section|carousel|strip|list|row|region|scroll\s*(?:area|view|section)))\s+(?:located|positioned|placed|situated)$/i,
+      '$1'
+    );
   const relWord = m[2].toLowerCase().replace(/\s+/g, ' ');
   const anchorRest = trimPunct(m[3].trim());
   const relation = PROXIMITY_RELATIONS[relWord];
