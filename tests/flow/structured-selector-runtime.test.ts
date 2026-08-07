@@ -10,6 +10,7 @@ const PAGE_SOURCE = `<?xml version="1.0" encoding="UTF-8"?>
     <android.widget.Button class="android.widget.Button" text="Item" resource-id="com.demo:id/item" clickable="true" enabled="true" bounds="[100,400][500,520]" />
     <android.widget.Button class="android.widget.Button" text="Item" resource-id="com.demo:id/item" clickable="true" enabled="true" bounds="[100,600][500,720]" />
     <android.widget.EditText class="android.widget.EditText" text="runtime-secret" resource-id="com.demo:id/password" password="true" clickable="true" enabled="true" bounds="[100,800][700,920]" />
+    <android.view.ViewGroup class="android.view.ViewGroup" text="" content-desc="" resource-id="com.demo:id/merchant_ai_container" clickable="false" enabled="true" bounds="[427,1700][652,1847]" />
   </android.widget.FrameLayout>
 </hierarchy>`;
 
@@ -55,6 +56,23 @@ describe('structured selector runtime', () => {
       calls.find((call) => call.name === 'appium_gesture' && call.args.action === 'tap')?.args
     ).toMatchObject({ x: 300, y: 260 });
     expect(result.selectorDiagnostics).toMatchObject({ matchedCount: 1 });
+  });
+
+  test('taps an id-only container even when the node itself is not marked clickable', async () => {
+    const result = await run({
+      kind: 'tap',
+      label: 'id-only structured target',
+      selector: { id: 'com.demo:id/merchant_ai_container' },
+    });
+
+    expect(result.success).toBe(true);
+    expect(
+      calls.find((call) => call.name === 'appium_gesture' && call.args.action === 'tap')?.args
+    ).toMatchObject({ x: 539, y: 1773 });
+    expect(result.selectorDiagnostics).toMatchObject({
+      matchedCount: 1,
+      matched: [expect.objectContaining({ clickable: false })],
+    });
   });
 
   test('fails ambiguous actions instead of silently choosing an element', async () => {

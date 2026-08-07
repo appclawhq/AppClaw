@@ -10,7 +10,7 @@ import { resolve } from 'node:path';
 import type { MCPClient } from '../mcp/types.js';
 import type { AppClawConfig } from '../config.js';
 import type { Platform, DeviceType } from '../sdk/types.js';
-import { extractText } from '../mcp/tools.js';
+import { extractText, isMCPError } from '../mcp/tools.js';
 import { setDeviceScreenSize, setDevicePlatform } from '../vision/window-size.js';
 import {
   extractIOSModelFromDeviceInfo,
@@ -26,6 +26,52 @@ export interface SessionResult {
   sessionId: string;
   /** Session-scoped MCP wrapper — injects sessionId into every tool call. */
   scopedMcp: MCPClient;
+}
+
+const ANDROID_DRIVER_SETTINGS = {
+  actionAcknowledgmentTimeout: 0,
+  waitForIdleTimeout: 0,
+  waitForSelectorTimeout: 0,
+} as const;
+
+/**
+ * UiAutomator2 exposes these as session settings, not capabilities. Applying
+ * them after session creation prevents dynamic apps from blocking page-source
+ * reads while waiting for a permanently busy accessibility tree to go idle.
+ */
+async function configureAndroidDriverSettings(mcp: MCPClient): Promise<void> {
+  const result = await mcp.callTool('appium_driver_settings', {
+    action: 'update',
+    settings: ANDROID_DRIVER_SETTINGS,
+  });
+  if (isMCPError(result)) {
+    throw new Error(extractText(result) || 'Failed to update Android driver settings');
+  }
+}
+
+async function configureSessionAfterCreate(
+  baseMcp: MCPClient,
+  scopedMcp: MCPClient,
+  platform: Platform,
+  sessionId: string
+): Promise<void> {
+  if (platform !== 'android') return;
+
+  try {
+    await configureAndroidDriverSettings(scopedMcp);
+  } catch (error) {
+    // The session already exists at this point. Best-effort deletion prevents
+    // a failed settings handshake from leaking UiAutomator2 ports/processes.
+    try {
+      await baseMcp.callTool('appium_session_management', {
+        action: 'delete',
+        sessionId,
+      });
+    } catch {
+      // Preserve the settings failure as the actionable root cause.
+    }
+    throw error;
+  }
 }
 
 /**
@@ -113,6 +159,7 @@ export async function createPlatformSession(
 
     // Wrap with a session-scoped client so all subsequent tool calls target this session
     const scopedMcp = new SessionScopedMCPClient(mcp, sessionId);
+    await configureSessionAfterCreate(mcp, scopedMcp, platform, sessionId);
 
     // Set platform + detect screen size via the scoped client (stores under scopedMcp in WeakMap)
     setDevicePlatform(scopedMcp, platform);
@@ -286,6 +333,7 @@ async function createCloudSession(
     const sessionId = sessionIdMatch?.[1] ?? 'session';
 
     const scopedMcp = new SessionScopedMCPClient(mcp, sessionId);
+    await configureSessionAfterCreate(mcp, scopedMcp, platform, sessionId);
     setDevicePlatform(scopedMcp, platform);
     await detectScreenSize(scopedMcp, platform);
 

@@ -161,7 +161,6 @@ per-test platform/OS tags.
   "platformName": "Android",
   "appium:automationName": "UiAutomator2",
   "appium:deviceName": "Android Device",
-  "appium:settings[...]": 0,
   "appium:autoGrantPermissions": true,
   "appium:newCommandTimeout": 300,
 
@@ -181,6 +180,22 @@ instead of `systemPort`/`mjpeg`.
 Merge order (later wins): `appium-mcp defaults` < `CAPABILITIES_FILE` <
 `extraCaps` (ports + udid). Assembled in `sdk/mcp-session.ts` →
 `device/session.ts:createPlatformSession`.
+
+After an Android session is created, AppClaw calls `appium_driver_settings`
+for that session before probing the device:
+
+```json
+{
+  "actionAcknowledgmentTimeout": 0,
+  "waitForIdleTimeout": 0,
+  "waitForSelectorTimeout": 0
+}
+```
+
+These are UiAutomator2 session settings, not W3C capabilities. Applying them
+through the settings endpoint prevents dynamic pages from stalling page-source
+reads while waiting for an idle accessibility tree. If the settings update
+fails, session setup fails fast and deletes the just-created session.
 
 ---
 

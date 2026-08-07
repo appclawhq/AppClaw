@@ -56,6 +56,18 @@ String shorthand is exact and case-insensitive. Use an explicit matcher for cont
 Action selectors must resolve to exactly one visible element. If several elements match, add an
 `index` or relation. AppClaw reports ambiguity instead of silently choosing the first match.
 
+On Android, an element with a stable `resource-id` remains selectable even when UiAutomator2
+reports `clickable=false` and exposes no `text` or `content-desc`. This pattern is common when a
+parent gesture layer handles the tap while a child container carries the ID and bounds. Structured
+tap actions use the uniquely resolved element's center coordinates, so no vision fallback is needed:
+
+```yaml
+- tap:
+    id: com.example:id/ask_ai_container
+```
+
+Empty, non-interactive Android layout nodes without a `resource-id` are still filtered out.
+
 ## Spatial and tree relations
 
 Relations accept text shorthand or a nested selector:

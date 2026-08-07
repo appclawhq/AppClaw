@@ -64,8 +64,13 @@ export function parseAndroidPageSource(xmlContent: string): UIElement[] {
 
       const isInteractive = isClickable || isEditable || isLongClickable || isScrollable;
       const hasContent = !!(text || desc);
+      // Some Android apps attach the gesture to an ancestor while exposing a
+      // stable resource-id and bounds on a child container. Keeping id-bearing
+      // nodes makes those targets addressable by deterministic selectors even
+      // when UiAutomator2 reports clickable=false and no accessible label.
+      const hasStableId = !!resourceId;
 
-      if (isInteractive || hasContent) {
+      if (isInteractive || hasContent || hasStableId) {
         const bounds: string = node['@_bounds'];
         try {
           const coords = bounds
