@@ -103,6 +103,21 @@ describe('structured selector runtime', () => {
     });
   });
 
+  test('keeps structured scroll assertions compatible with anchored scroll targets', async () => {
+    const result = await run({
+      kind: 'scrollAssert',
+      selector: { id: 'com.demo:id/submit' },
+      direction: 'down',
+      maxScrolls: 2,
+      target: 'Item',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.message).toContain('selector(id="com.demo:id/submit")');
+    expect(result.selectorDiagnostics).toMatchObject({ matchedCount: 1 });
+    expect(calls.some((call) => call.name === 'appium_gesture')).toBe(false);
+  });
+
   test('redacts resolved secrets from messages and nested diagnostics', async () => {
     const result = await run({
       kind: 'type',
