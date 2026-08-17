@@ -81,10 +81,26 @@ function parseArgs(args: string[]): ParsedArgs {
     const a = args[i];
     if (a === '--help' || a === '-h') parsed.help = true;
     else if (a === '--full') parsed.full = true;
-    else if (a === '--platform') parsed.platform = args[++i] as Platform;
-    else if (a === '--env-file' || a === '--env-path') parsed.envFile = args[++i];
-    else if (a.startsWith('--platform=')) parsed.platform = a.slice(11) as Platform;
-    else if (a.startsWith('--env-file=')) parsed.envFile = a.slice(11);
+    else if (a === '--platform') {
+      const p = args[++i];
+      if (p !== 'android' && p !== 'ios') throw new Error(`Invalid platform: ${p}`);
+      parsed.platform = p as Platform;
+    }
+    else if (a === '--env-file' || a === '--env-path') {
+      const p = args[++i];
+      if (!p) throw new Error(`Missing value for ${a}`);
+      parsed.envFile = p;
+    }
+    else if (a.startsWith('--platform=')) {
+      const p = a.slice(11);
+      if (p !== 'android' && p !== 'ios') throw new Error(`Invalid platform: ${p}`);
+      parsed.platform = p as Platform;
+    }
+    else if (a.startsWith('--env-file=')) {
+      const p = a.slice(11);
+      if (!p) throw new Error(`Missing value for --env-file=`);
+      parsed.envFile = p;
+    }
   }
   return parsed;
 }
@@ -332,7 +348,7 @@ export async function runDoctor(args: string[]): Promise<number> {
       return 1;
     }
     const { config: loadDotenvFile } = await import('dotenv');
-    loadDotenvFile({ path: envPath, override: true, quiet: true });
+    loadDotenvFile({ path: envPath, override: true });
   }
 
   console.log(`\n  ${chalk.hex('#FC8EAC')('◐')} ${chalk.bold('AppClaw doctor')}`);
