@@ -145,6 +145,9 @@ function printHelp(): void {
   // ── Modes ──
   console.log(`  ${c.section('Modes')}`);
   console.log(
+    `    ${c.flag('doctor')}                         ${c.desc('Check setup: Node, .env, LLM key, appium-mcp, devices (--full: MCP handshake)')}`
+  );
+  console.log(
     `    ${c.flag('--flow')} ${c.arg('<file.yaml>')}           ${c.desc('Run declarative YAML steps (no LLM)')}`
   );
   console.log(

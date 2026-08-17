@@ -38,10 +38,11 @@ AppClaw:
 
 ```bash
 npm install -g @appclaw/cli
+appclaw doctor   # preflight: Node, .env, LLM key, appium-mcp, devices
 appclaw "open the settings app and turn on airplane mode"
 ```
 
-You'll need **Node.js 22+**, a connected device / emulator / simulator, and an **LLM API key** (Anthropic, OpenAI, Google, Groq, or local Ollama). Full setup → **[appclaw.in](https://appclaw.in)**.
+You'll need **Node.js 22+**, a connected device / emulator / simulator, and an **LLM API key** (Anthropic, OpenAI, Google, Groq, or local Ollama). `appclaw doctor` checks all of this in seconds and prints fix hints for anything missing (`--full` also spawns appium-mcp for a real handshake). Full setup → **[appclaw.in](https://appclaw.in)**.
 
 ## What it can do
 

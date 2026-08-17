@@ -1,10 +1,15 @@
 #!/usr/bin/env node
 
-// `appclaw init` scaffolds a project; `appclaw test ...` routes to the runner
-// CLI; everything else falls through to the main interactive/flow/report entry.
+// `appclaw init` scaffolds a project; `appclaw doctor` runs the environment
+// preflight; `appclaw test ...` routes to the runner CLI; everything else
+// falls through to the main interactive/flow/report entry.
 if (process.argv[2] === 'init') {
   const { runInit } = await import('../dist/cli/init.js');
   const code = await runInit(process.argv.slice(3));
+  process.exit(code);
+} else if (process.argv[2] === 'doctor') {
+  const { runDoctor } = await import('../dist/cli/doctor.js');
+  const code = await runDoctor(process.argv.slice(3));
   process.exit(code);
 } else if (process.argv[2] === 'test') {
   // Spec/config files (appclaw.config.ts, *.spec.ts) are TypeScript, loaded via

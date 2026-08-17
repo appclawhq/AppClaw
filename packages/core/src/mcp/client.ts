@@ -18,7 +18,7 @@ import { VERSION } from '../version.js';
  * Falls back to npx for backwards compatibility (e.g. very old global installs
  * that pre-date appium-mcp being a listed dependency).
  */
-function resolveAppiumMcp(): { command: string; args: string[] } {
+export function resolveAppiumMcp(): { command: string; args: string[] } {
   try {
     const req = createRequire(import.meta.url);
     // Resolve via package.json (always exported) then navigate to the bin
