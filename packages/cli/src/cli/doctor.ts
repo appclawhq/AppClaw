@@ -85,18 +85,15 @@ function parseArgs(args: string[]): ParsedArgs {
       const p = args[++i];
       if (p !== 'android' && p !== 'ios') throw new Error(`Invalid platform: ${p}`);
       parsed.platform = p as Platform;
-    }
-    else if (a === '--env-file' || a === '--env-path') {
+    } else if (a === '--env-file' || a === '--env-path') {
       const p = args[++i];
       if (!p) throw new Error(`Missing value for ${a}`);
       parsed.envFile = p;
-    }
-    else if (a.startsWith('--platform=')) {
+    } else if (a.startsWith('--platform=')) {
       const p = a.slice(11);
       if (p !== 'android' && p !== 'ios') throw new Error(`Invalid platform: ${p}`);
       parsed.platform = p as Platform;
-    }
-    else if (a.startsWith('--env-file=')) {
+    } else if (a.startsWith('--env-file=')) {
       const p = a.slice(11);
       if (!p) throw new Error(`Missing value for --env-file=`);
       parsed.envFile = p;
@@ -139,9 +136,7 @@ function checkNode(): void {
 /** Loaded lazily so a broken .env is reported as a failed check, not a crash. */
 type CoreConfig = typeof import('@appclaw/core/config');
 
-async function checkConfig(): Promise<
-  ReturnType<CoreConfig['loadConfig']> | null
-> {
+async function checkConfig(): Promise<ReturnType<CoreConfig['loadConfig']> | null> {
   try {
     const mod: CoreConfig = await import('@appclaw/core/config');
     const cfg = mod.loadConfig();
@@ -170,7 +165,10 @@ async function checkLLM(cfg: NonNullable<Awaited<ReturnType<typeof checkConfig>>
       const data = (await res.json()) as { models?: unknown[] };
       ok(`Ollama reachable at ${base} (${data.models?.length ?? 0} models installed)`);
     } catch {
-      fail(`Ollama not reachable at ${base}`, 'Start it: ollama serve  (then: ollama pull llama3.2)');
+      fail(
+        `Ollama not reachable at ${base}`,
+        'Start it: ollama serve  (then: ollama pull llama3.2)'
+      );
     }
     return;
   }
@@ -273,7 +271,11 @@ async function checkIOS(required: boolean, realDevice: boolean): Promise<boolean
     const { stdout } = await exec('xcode-select', ['-p'], { timeout: 5000 });
     ok(`Xcode developer tools at ${stdout.trim()}`);
   } catch {
-    report(required, 'Xcode command line tools not installed', 'Install them: xcode-select --install');
+    report(
+      required,
+      'Xcode command line tools not installed',
+      'Install them: xcode-select --install'
+    );
     return false;
   }
 
@@ -288,7 +290,9 @@ async function checkIOS(required: boolean, realDevice: boolean): Promise<boolean
     const { stdout } = await exec('xcrun', ['simctl', 'list', 'devices', 'booted', '--json'], {
       timeout: 10000,
     });
-    const parsed = JSON.parse(stdout) as { devices: Record<string, Array<{ name: string; state: string }>> };
+    const parsed = JSON.parse(stdout) as {
+      devices: Record<string, Array<{ name: string; state: string }>>;
+    };
     const booted = Object.values(parsed.devices)
       .flat()
       .filter((d) => d.state === 'Booted');
@@ -309,7 +313,9 @@ async function checkIOS(required: boolean, realDevice: boolean): Promise<boolean
 }
 
 /** `--full`: spawn appium-mcp over stdio and verify the tool list comes back. */
-async function checkHandshake(cfg: NonNullable<Awaited<ReturnType<typeof checkConfig>>>): Promise<void> {
+async function checkHandshake(
+  cfg: NonNullable<Awaited<ReturnType<typeof checkConfig>>>
+): Promise<void> {
   out.section('MCP handshake (--full)');
   try {
     const { createMCPClient } = await import('@appclaw/core/mcp/client');
