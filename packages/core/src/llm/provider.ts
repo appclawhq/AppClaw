@@ -381,6 +381,20 @@ function isGemini25Family(modelId: string): boolean {
   return /gemini-2\.5/i.test(modelId);
 }
 
+/**
+ * Adaptive thinking landed with Claude 4.6 and is the only thinking mode the
+ * 5 family accepts. Pre-4.6 models (4.5 and older) support only the budgeted
+ * `{type:'enabled', budgetTokens}` form.
+ */
+function supportsAdaptiveThinking(modelId: string): boolean {
+  const id = modelId.toLowerCase();
+  // 5 family: claude-opus-5, claude-sonnet-5, claude-fable-5, claude-mythos-5
+  if (/^claude-[a-z]+-5\b/.test(id)) return true;
+  // 4.x: adaptive from 4-6 onward (4-6, 4-7, 4-8, …)
+  const minor = id.match(/^claude-[a-z]+-4-(\d+)/);
+  return minor ? Number(minor[1]) >= 6 : false;
+}
+
 export function buildThinkingOptions(config: AppClawConfig): Record<string, any> | undefined {
   if (config.LLM_THINKING !== 'on') return undefined;
   if (!THINKING_PROVIDERS.has(config.LLM_PROVIDER)) return undefined;
@@ -394,6 +408,23 @@ export function buildThinkingOptions(config: AppClawConfig): Record<string, any>
 
   switch (config.LLM_PROVIDER) {
     case 'anthropic':
+      // Anthropic rejects `{type:'enabled'}` when tool_choice forces tool use
+      // ("Thinking may not be enabled when tool_choice forces tool use"), and
+      // getDecision always sends toolChoice:'required'. Adaptive is the only
+      // thinking mode the API permits alongside forced tools — and the
+      // documented replacement for budgetTokens on 4.6+ regardless.
+      // `display:'summarized'` is required for reasoning to reach the UI; the
+      // API default omits it and streams empty thinking blocks.
+      if (supportsAdaptiveThinking(modelId)) {
+        return {
+          anthropic: {
+            thinking: { type: 'adaptive', display: 'summarized' },
+          },
+        };
+      }
+      // Pre-4.6 models have no adaptive mode. The budgeted form still cannot
+      // coexist with forced tool use; the agent loop reports that 400 as fatal
+      // rather than retrying it.
       return {
         anthropic: {
           thinking: { type: 'enabled', budgetTokens: budget },
@@ -534,7 +565,15 @@ export function createLLMProvider(config: AppClawConfig, mcpTools: MCPToolInfo[]
         // textStream omits reasoning — use fullStream so goal-based runs show thinking.
         let reasoningText = '';
         let streamingStarted = false;
+        let streamError: unknown;
         for await (const part of stream.fullStream) {
+          // Provider failures arrive as `error` parts. The promises awaited
+          // below then throw a generic NoOutputGeneratedError that carries no
+          // `cause`, so the actionable message is lost unless captured here.
+          if (part.type === 'error') {
+            streamError = (part as any).error;
+            continue;
+          }
           const chunk =
             part.type === 'reasoning-delta'
               ? part.text
@@ -550,6 +589,13 @@ export function createLLMProvider(config: AppClawConfig, mcpTools: MCPToolInfo[]
           callbacks.onTextChunk?.(chunk);
         }
         if (streamingStarted) callbacks.onDone?.();
+
+        // Rethrow the provider's own error rather than letting the awaits below
+        // surface it as "No output generated. Check the stream for errors."
+        if (streamError) {
+          clearTimeout(abortTimer);
+          throw streamError;
+        }
 
         // Await final results after stream completes
         const [streamUsage, streamTotalUsage, toolCalls, text, providerMeta, response] =

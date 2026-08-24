@@ -15,6 +15,7 @@ import { typeViaKeyboard, detectDeviceUdid, pressEnterKey } from '../mcp/keyboar
 import type { LLMProvider, AgentContext, ToolCallDecision } from '../llm/provider.js';
 import type { ActionResult } from '../llm/schemas.js';
 import { getScreenState } from '../perception/screen.js';
+import { detectScreenOff } from '../device/android-power.js';
 import { diffScreen, computePerceptionHash } from '../perception/screen-diff.js';
 import { createStuckDetector } from './stuck.js';
 import { shouldPreferVisionLocateTap } from './vision-tap-policy.js';
@@ -134,6 +135,22 @@ export interface StepRecord {
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Describe a screen-capture failure, appending a device-state hint when a
+ * sleeping display is the cause. Only probes on timeouts — every other failure
+ * mode already reports itself, and the probe costs an adb round-trip.
+ */
+async function describeScreenFailure(
+  err: unknown,
+  platform: 'android' | 'ios',
+  deviceUdid?: string | null
+): Promise<string> {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (platform !== 'android' || !/timed out|timeout/i.test(msg)) return msg;
+  const hint = await detectScreenOff(deviceUdid ?? undefined);
+  return hint ? `${msg} — ${hint}` : msg;
+}
 
 export async function runAgent(options: AgentOptions): Promise<AgentResult> {
   let { goal } = options;
@@ -298,8 +315,9 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
         );
       } catch (err) {
         ui.stopSpinner();
-        ui.printError(`Step ${step + 1}: Failed to get screen state`, String(err));
-        lastResult = `Screen capture failed: ${err}`;
+        const detail = await describeScreenFailure(err, detectedPlatform, deviceUdid);
+        ui.printError(`Step ${step + 1}: Failed to get screen state`, detail);
+        lastResult = `Screen capture failed: ${detail}`;
         cachedPostScreen = undefined; // Invalidate cache on failure
         continue;
       }
@@ -343,6 +361,19 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
               modelName,
               totalCachedTokens
             );
+
+            // Second early-return path with the same gap as the LLM "done"
+            // branch above: screenEvaluator can conclude the goal is already
+            // satisfied from a screen diff alone, without an LLM tool call —
+            // still needs an onStep so the answer reaches the logger/SDK/JSON.
+            onStep?.({
+              step,
+              decision: { toolName: 'done', args: { reason: evaluation.reason } },
+              result: { success: true, message: evaluation.reason },
+              elementsCount: screen.elementCount,
+              screenshot: postActionScreenshot,
+            });
+
             return {
               success: true,
               reason: evaluation.reason,
@@ -574,6 +605,8 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
     } catch (err: any) {
       const errName = err?.name ?? '';
       const errMsg = err?.message ?? '';
+      const status = err?.statusCode ?? err?.status;
+      const apiErrorType = err?.data?.error?.type ?? err?.responseBody?.error?.type;
       if (
         errName.includes('UnsupportedModel') ||
         errName.includes('AuthenticationError') ||
@@ -581,23 +614,27 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
         errMsg.includes('API key') ||
         errMsg.includes('is not found') ||
         errMsg.includes('NOT_FOUND') ||
-        err?.statusCode === 401 ||
-        err?.statusCode === 404
+        // A malformed request never succeeds on retry — a bad thinking/tool
+        // config would otherwise burn the entire step budget on identical 400s.
+        status === 400 ||
+        status === 401 ||
+        status === 404 ||
+        apiErrorType === 'invalid_request_error'
       ) {
         ui.stopStreaming();
         ui.stopSpinner();
-        ui.printError('Fatal LLM error', err.message ?? String(err));
+        ui.printError('Fatal LLM error', errMsg || String(err));
         return {
           success: false,
-          reason: `Fatal LLM error: ${err.message ?? err}`,
+          reason: `Fatal LLM error: ${errMsg || err}`,
           stepsUsed: step + 1,
           history,
         };
       }
       ui.stopStreaming();
       ui.stopSpinner();
-      ui.printError(`Step ${step + 1}: LLM error`, String(err));
-      lastResult = `LLM call failed: ${err}`;
+      ui.printError(`Step ${step + 1}: LLM error`, errMsg || String(err));
+      lastResult = `LLM call failed: ${errMsg || err}`;
       continue;
     }
 
@@ -708,7 +745,7 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
       } catch (err) {
         // Verification failed to execute — log but accept the done to avoid blocking indefinitely
         ui.printWarning(
-          `Done verification failed: ${err instanceof Error ? err.message : String(err)}`
+          `Done verification failed: ${await describeScreenFailure(err, detectedPlatform, deviceUdid)}`
         );
       }
 
@@ -722,6 +759,19 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
       const cost =
         (totalInputTokens / 1_000_000) * pricing[0] + (totalOutputTokens / 1_000_000) * pricing[1];
       ui.printTokenSummary(totalInputTokens, totalOutputTokens, cost, modelName, totalCachedTokens);
+
+      // The "done" branch returns here rather than falling through to the
+      // bottom-of-loop onStep() call below — without this, the step carrying
+      // the LLM's actual answer (reason) never reaches the session logger,
+      // the SDK's onStep consumers, or the JSON event stream.
+      onStep?.({
+        step,
+        decision,
+        result: { success: true, message: reason },
+        elementsCount: screen.elementCount,
+        screenshot: postActionScreenshot,
+      });
+
       return {
         success: true,
         reason,

@@ -53,20 +53,27 @@ export function FinalSummary({ data }: { data: JourneySummaryData }) {
           {data.subGoals.map((sg, i) => {
             const sgOk = sg.status === 'completed';
             return (
-              <Box key={i}>
-                <Box width={3}>
-                  <Text color={sgOk ? COLORS.green : COLORS.red} bold>
-                    {sgOk ? symbols.check : symbols.cross}
-                  </Text>
+              <Box key={i} flexDirection="column">
+                <Box>
+                  <Box width={3}>
+                    <Text color={sgOk ? COLORS.green : COLORS.red} bold>
+                      {sgOk ? symbols.check : symbols.cross}
+                    </Text>
+                  </Box>
+                  <Box width={nameW}>
+                    <Text color={sgOk ? undefined : COLORS.red}>{sg.goal}</Text>
+                  </Box>
+                  <Box width={5} justifyContent="flex-end">
+                    <Text color={sgOk ? COLORS.green : COLORS.red} bold>
+                      {sgOk ? 'pass' : 'FAIL'}
+                    </Text>
+                  </Box>
                 </Box>
-                <Box width={nameW}>
-                  <Text color={sgOk ? undefined : COLORS.red}>{sg.goal}</Text>
-                </Box>
-                <Box width={5} justifyContent="flex-end">
-                  <Text color={sgOk ? COLORS.green : COLORS.red} bold>
-                    {sgOk ? 'pass' : 'FAIL'}
-                  </Text>
-                </Box>
+                {sg.result ? (
+                  <Box paddingLeft={3} width={inner}>
+                    <Text color={sgOk ? COLORS.dimmed : COLORS.red}>{sg.result}</Text>
+                  </Box>
+                ) : null}
               </Box>
             );
           })}

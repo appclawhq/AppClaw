@@ -118,7 +118,7 @@ export async function typeViaSetValue(mcp: MCPClient, text: string): Promise<Key
   return { success: false, message: `Could not type "${text}"` };
 }
 
-function getADBPath(): string {
+export function getADBPath(): string {
   const androidHome =
     process.env.ANDROID_HOME ||
     process.env.ANDROID_SDK_ROOT ||
