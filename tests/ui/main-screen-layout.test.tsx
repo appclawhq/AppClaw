@@ -35,9 +35,15 @@ async function frameAt(columns: number, rows: number): Promise<string[]> {
 
   tuiStore.reset();
   tuiStore.goTo('main');
+  // debug: true is load-bearing, not a leftover. Ink's onRender consults
+  // `is-in-ci` and, when set, buffers the frame instead of writing it — so on
+  // GitHub Actions nothing reaches `stdout` until unmount and every assertion
+  // below sees an empty frame. The debug branch is checked first and writes on
+  // every render, which is also how ink-testing-library stays CI-safe.
   const instance = render(<MainScreen actions={actions} />, {
     stdout,
     stdin,
+    debug: true,
     patchConsole: false,
     exitOnCtrlC: false,
   });
