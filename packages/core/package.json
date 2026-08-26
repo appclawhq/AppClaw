@@ -1,6 +1,6 @@
 {
   "name": "@appclaw/core",
-  "version": "2.4.0",
+  "version": "2.4.1",
   "description": "AppClaw headless engine and public SDK for mobile automation",
   "type": "module",
   "main": "dist/sdk/index.js",

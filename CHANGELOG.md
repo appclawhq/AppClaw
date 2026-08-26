@@ -1,3 +1,9 @@
+## [2.4.1](https://github.com/appclawhq/AppClaw/compare/v2.4.0...v2.4.1) (2026-08-24)
+
+### Bug Fixes
+
+* **agent:** repair broken Anthropic goal execution and missing result output ([#59](https://github.com/appclawhq/AppClaw/issues/59)) ([282441a](https://github.com/appclawhq/AppClaw/commit/282441a4663034c8f81d3462331efcef817f6492))
+
 ## [2.4.0](https://github.com/appclawhq/AppClaw/compare/v2.3.0...v2.4.0) (2026-08-17)
 
 ### Features

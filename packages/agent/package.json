@@ -1,6 +1,6 @@
 {
   "name": "@appclaw/agent",
-  "version": "2.4.0",
+  "version": "2.4.1",
   "description": "Agent-native terminal CLI for AppClaw mobile automation",
   "type": "module",
   "bin": {
@@ -22,7 +22,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@appclaw/core": "2.4.0"
+    "@appclaw/core": "2.4.1"
   },
   "devDependencies": {
     "@semantic-release/changelog": "^6.0.3",

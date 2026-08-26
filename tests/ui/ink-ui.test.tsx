@@ -345,3 +345,59 @@ describe('StreamPanel unicode placeholders', () => {
     expect(out).toContain('▀▀▀▀');
   });
 });
+
+describe('Ink FinalSummary', () => {
+  const journeyData = (
+    overrides: Partial<JourneySummaryData> = {},
+    subGoals: JourneySummaryData['subGoals'] = []
+  ): JourneySummaryData => ({
+    success: true,
+    overallGoal: 'open settings and get the wifi name',
+    subGoals,
+    totalSteps: 3,
+    durationMs: 58400,
+    tokens: { input: 17425, output: 86, cost: 0.0536, model: 'claude-sonnet-4-6' },
+    ...overrides,
+  });
+
+  // Regression test for the bug where a sub-goal's `done` reason — e.g. the
+  // Wi-Fi name the agent was asked to find — reached this component but was
+  // never rendered, only its goal text and pass/fail were.
+  test('renders each sub-goal result text, not just goal + pass/fail', () => {
+    const data = journeyData({}, [
+      { goal: 'Open the Settings app', status: 'completed', result: 'Opened Settings' },
+      {
+        goal: 'Navigate to Network & internet → Internet and identify the Wi-Fi name',
+        status: 'completed',
+        result: "The connected Wi-Fi network is 'AndroidWifi'",
+      },
+    ]);
+    const { lastFrame, unmount } = render(<FinalSummary data={data} />);
+    const out = lastFrame() ?? '';
+    expect(out).toContain('AndroidWifi');
+    expect(out).toContain('Opened Settings');
+    unmount();
+  });
+
+  test('renders a failed sub-goal result alongside FAIL', () => {
+    const data = journeyData({ success: false }, [
+      {
+        goal: "Tap on 'Network & internet'",
+        status: 'failed',
+        result: 'UiAutomator2 driver crashed',
+      },
+    ]);
+    const { lastFrame, unmount } = render(<FinalSummary data={data} />);
+    const out = lastFrame() ?? '';
+    expect(out).toContain('FAIL');
+    expect(out).toContain('UiAutomator2 driver crashed');
+    unmount();
+  });
+
+  test('omits the result line when a sub-goal has no result text', () => {
+    const data = journeyData({}, [{ goal: 'Open the Settings app', status: 'completed' }]);
+    const { lastFrame, unmount } = render(<FinalSummary data={data} />);
+    expect(lastFrame()).toContain('Open the Settings app');
+    unmount();
+  });
+});

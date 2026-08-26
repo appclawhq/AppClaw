@@ -1,6 +1,6 @@
 {
   "name": "appclaw",
-  "version": "2.4.0",
+  "version": "2.4.1",
   "description": "Agentic AI layer for mobile automation via appium-mcp",
   "type": "module",
   "private": true,

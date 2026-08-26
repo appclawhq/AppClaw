@@ -1,6 +1,6 @@
 {
   "name": "@appclaw/cli",
-  "version": "2.4.0",
+  "version": "2.4.1",
   "description": "AppClaw interactive CLI (Ink) for mobile automation",
   "type": "module",
   "bin": {
@@ -25,8 +25,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@appclaw/core": "2.4.0",
-    "@appclaw/runner": "2.4.0",
+    "@appclaw/core": "2.4.1",
+    "@appclaw/runner": "2.4.1",
     "ink": "^5.2.1",
     "ink-spinner": "^5.0.0",
     "ink-text-input": "^6.0.0",

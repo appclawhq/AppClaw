@@ -11,9 +11,9 @@
     "test:ci": "appclaw-runner --env-file ../../.env --workers 2 --retries 1 --shard 1/1"
   },
   "devDependencies": {
-    "@appclaw/core": "2.4.0",
-    "@appclaw/runner": "2.4.0",
+    "@appclaw/core": "2.4.1",
+    "@appclaw/runner": "2.4.1",
     "tsx": "^4.21.0"
   },
-  "version": "2.4.0"
+  "version": "2.4.1"
 }
