@@ -10,9 +10,12 @@ import { RunScreen, tailSlice } from '@appclaw/cli/ui/ink/RunScreen';
 import type { TimelineEntry, JourneySummaryData } from '@appclaw/cli/ui/ink/store';
 import { store } from '@appclaw/cli/ui/ink/store';
 import { askUserViaInk } from '@appclaw/cli/ui/ink/InkRenderer';
-import { PlaygroundApp } from '@appclaw/cli/ui/ink/PlaygroundApp';
-import { pgStore } from '@appclaw/cli/ui/ink/playground-store';
 import { FinalSummary } from '@appclaw/cli/ui/ink/components/FinalSummary';
+import { Box, Text } from 'ink';
+import stringWidth from 'string-width';
+import { StreamPanel } from '@appclaw/cli/tui/components/StreamPanel';
+import { columnWidths, panelImageRows } from '@appclaw/cli/tui/stream/layout';
+import { PLACEHOLDER_CHAR } from '@appclaw/cli/tui/stream/placeholder';
 
 const tick = (ms = 30) => new Promise((r) => setTimeout(r, ms));
 
@@ -214,72 +217,6 @@ describe('Ink RunScreen', () => {
   });
 });
 
-describe('Ink PlaygroundApp', () => {
-  test('renders prompt with label + step count, runs a command', async () => {
-    pgStore.reset();
-    let steps = 0;
-    const ran: string[] = [];
-    const { lastFrame, stdin, unmount } = render(
-      <PlaygroundApp
-        info={{ platform: 'android', model: 'opus', mode: 'dom', transport: 'stdio' }}
-        onCommand={async (line) => {
-          ran.push(line);
-          steps += 1;
-        }}
-        onQuit={async () => {}}
-        getStepCount={() => steps}
-        refreshStepCount={() => pgStore.setStepCount(steps)}
-      />
-    );
-    pgStore.setStepCount(0);
-    await tick();
-    expect(lastFrame()).toContain('android');
-    expect(lastFrame()).toContain('steps 0');
-
-    stdin.write('tap on Login');
-    await tick();
-    stdin.write('\r');
-    await tick(60);
-
-    expect(ran).toEqual(['tap on Login']);
-    expect(lastFrame()).toContain('steps 1');
-    unmount();
-  });
-
-  test('quit requires confirmation when steps are unsaved', async () => {
-    pgStore.reset();
-    let quit = false;
-    const { stdin, unmount } = render(
-      <PlaygroundApp
-        info={{ platform: 'ios', model: 'opus', mode: 'vision', transport: 'stdio' }}
-        onCommand={async () => {}}
-        onQuit={async () => {
-          quit = true;
-        }}
-        getStepCount={() => 3}
-        refreshStepCount={() => {}}
-      />
-    );
-    pgStore.setStepCount(3);
-    await tick();
-
-    // first /quit → confirmation, not quit yet
-    stdin.write('/quit');
-    await tick();
-    stdin.write('\r');
-    await tick(40);
-    expect(quit).toBe(false);
-
-    // second /quit → quits
-    stdin.write('/quit');
-    await tick();
-    stdin.write('\r');
-    await tick(40);
-    expect(quit).toBe(true);
-    unmount();
-  });
-});
-
 describe('Ink FinalSummary', () => {
   const journeyData = (
     overrides: Partial<JourneySummaryData> = {},
@@ -333,5 +270,78 @@ describe('Ink FinalSummary', () => {
     const { lastFrame, unmount } = render(<FinalSummary data={data} />);
     expect(lastFrame()).toContain('Open the Settings app');
     unmount();
+  });
+});
+
+/**
+ * The whole point of Unicode placeholders is that Ink lays the picture out, so
+ * the thing worth pinning down is that a row of them still measures like text.
+ *
+ * It nearly doesn't: Ink's output buffer bills each placeholder (a surrogate
+ * pair) as two cells while the terminal draws it as one, so a placeholder row
+ * runs past the panel and eats the borders to its right. <StreamPanel> redraws
+ * them; this asserts the redraw lands in the right column.
+ */
+describe('StreamPanel unicode placeholders', () => {
+  const termCols = 100; // ink-testing-library's stdout width
+  const termRows = 24;
+
+  function frameOf(stream: unknown) {
+    const { left, right } = columnWidths(termCols);
+    const imageRows = panelImageRows(termRows, true);
+    const { lastFrame, unmount } = render(
+      <Box flexDirection="column" paddingX={1}>
+        <Box flexDirection="column" borderStyle="round" paddingX={1}>
+          <Box flexDirection="row">
+            <Box width={left} marginRight={1} borderStyle="round" flexDirection="column">
+              {Array.from({ length: imageRows + 2 }, (_, i) => (
+                <Text key={i}>palette</Text>
+              ))}
+            </Box>
+            <StreamPanel
+              device={{ udid: 'x', name: 'emulator-5554', platform: 'android' } as never}
+              stream={stream as never}
+              width={right}
+              imageRows={imageRows}
+            />
+          </Box>
+        </Box>
+      </Box>
+    );
+    const out = lastFrame() ?? '';
+    unmount();
+    return out;
+  }
+
+  const live = {
+    status: 'running',
+    backend: 'kitty',
+    resolution: { width: 1080, height: 2400 },
+  };
+
+  test('every rendered row is the same display width, borders included', () => {
+    const lines = frameOf(live).split('\n');
+    const widths = new Set(lines.map((line) => stringWidth(line)));
+    expect(widths.size).toBe(1);
+  });
+
+  test('the rows carry one addressed placeholder cell per image row', () => {
+    const out = frameOf(live);
+    const rows = out.split('\n').filter((line) => line.includes(PLACEHOLDER_CHAR));
+    expect(rows.length).toBeGreaterThan(0);
+    // Row 0's leading cell: placeholder + row diacritic 0 + column diacritic 0.
+    expect(rows[0]).toContain(`${PLACEHOLDER_CHAR}̅̅`);
+    // Colour is asserted in tui-stream.test.ts — chalk emits none under vitest.
+  });
+
+  test('a half-block stream still renders as plain text rows', () => {
+    const out = frameOf({
+      status: 'running',
+      backend: 'halfblock',
+      resolution: { width: 1080, height: 2400 },
+      frameLines: ['▀▀▀▀'],
+    });
+    expect(out).not.toContain(PLACEHOLDER_CHAR);
+    expect(out).toContain('▀▀▀▀');
   });
 });

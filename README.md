@@ -44,23 +44,26 @@ appclaw "open the settings app and turn on airplane mode"
 
 You'll need **Node.js 22+**, a connected device / emulator / simulator, and an **LLM API key** (Anthropic, OpenAI, Google, Groq, or local Ollama). `appclaw doctor` checks all of this in seconds and prints fix hints for anything missing (`--full` also spawns appium-mcp for a real handshake). Full setup → **[appclaw.in](https://appclaw.in)**.
 
+Terminal Studio (`appclaw --tui`) can mirror the device inside the terminal with `/stream` (Android only). It looks best on a terminal that speaks the kitty graphics protocol — Ghostty, kitty, WezTerm — and falls back to half-block characters elsewhere.
+
 ## What it can do
 
 - **Agent mode** — plain-English goals; the LLM drives the device (tap, type, swipe)
 - **YAML flows** — deterministic, zero-LLM automation with [structured selectors and state assertions](docs/structured-selectors.md)
-- **Test runner** — vitest-style specs across real devices; scaffold with `appclaw init`
+- **Terminal Studio** (`appclaw --tui`) — record steps one at a time, watch the device mirrored in the terminal, then `/export` a runnable spec
+- **Test runner** — vitest-style specs across real devices, run with `appclaw test`; scaffold with `appclaw init`
 - **SDK** — drive AppClaw from your own vitest / jest / mocha
-- **Playground, cloud devices, record & replay, PRD explorer**, and more
+- **Cloud devices, record & replay, PRD explorer**, and more
 
 Every mode is documented at **[appclaw.in](https://appclaw.in)**.
 
 ## Packages
 
-| Install                 | Package           | For                                                       |
-| ----------------------- | ----------------- | --------------------------------------------------------- |
-| `npm i -g @appclaw/cli` | `@appclaw/cli`    | the `appclaw` command — goals, flows, playground, reports |
-| via `appclaw init`      | `@appclaw/runner` | vitest-style test runner (`appclaw-runner`)               |
-| `npm i @appclaw/core`   | `@appclaw/core`   | the SDK / headless engine                                 |
+| Install                 | Package           | For                                                            |
+| ----------------------- | ----------------- | -------------------------------------------------------------- |
+| `npm i -g @appclaw/cli` | `@appclaw/cli`    | the `appclaw` command — goals, flows, Terminal Studio, reports |
+| via `appclaw init`      | `@appclaw/runner` | vitest-style test runner (`appclaw test`)                      |
+| `npm i @appclaw/core`   | `@appclaw/core`   | the SDK / headless engine                                      |
 
 ## Local development
 

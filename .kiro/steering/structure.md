@@ -36,7 +36,8 @@ appclaw/
 | `device/`        | Device setup pipeline — platform/device picker, iOS setup, Appium session         |
 | `memory/`        | Episodic memory — trajectory recording, fingerprinting, retrieval                 |
 | `explorer/`      | PRD → YAML flow generation, screen crawler                                        |
-| `playground/`    | Interactive REPL for building flows                                               |
+| `step-recorder/` | Shared step-recording helpers + the headless `--json --playground` NDJSON bridge  |
+| `tui/`           | Terminal Studio — multi-screen Ink app (`--tui`, alias `--playground`)            |
 | `recording/`     | Session recorder and adaptive replayer                                            |
 | `report/`        | Run artifact collection, HTML report rendering, Express server                    |
 | `sdk/`           | Public SDK — `GoalRunner`, `FlowRunner`, `StepRunner`, config builder             |

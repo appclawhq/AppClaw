@@ -142,7 +142,7 @@ export class AppResolver {
    * Re-fetch the installed-app list from the device and rebuild the lookup.
    *
    * The list is otherwise cached at init time, so an app installed *after* the
-   * session started (the common playground case: launch → sideload app → "open X")
+   * session started (the common step-recorder case: launch → sideload app → "open X")
    * would never resolve. Callers use this to retry once on a resolution miss.
    * Returns true if the list was refreshed, false if no device handle is available.
    */

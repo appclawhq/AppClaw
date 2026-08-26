@@ -1,9 +1,9 @@
 /**
  * Shared "run one natural-language instruction" pipeline.
  *
- * Both the SDK's `StepRunner` and the playground's per-line handler used to
+ * Both the SDK's `StepRunner` and the CLI's per-line step recorders used to
  * implement this pipeline inline. That duplication was the cause of bugs
- * where one surface (e.g. playground) supported a behaviour that the other
+ * where one surface (e.g. the TUI) supported a behaviour that the other
  * (e.g. SDK) silently lacked — most recently, element-targeted swipes.
  *
  * Now both surfaces call `runOneInstruction()` and add only their own UI /
@@ -45,7 +45,7 @@ import { locatorCacheStorage, type LocatorCacheCtx } from '../sdk/locator-cache.
 /**
  * Minimum matchScore (1-10) for a vision tap to be considered "found". Below
  * this, the tap is rejected even if Gemini returned coordinates. Shared by
- * SDK + playground so both surfaces agree on what counts as a real match.
+ * SDK + step recorders so every surface agrees on what counts as a real match.
  */
 export const DEFAULT_MIN_MATCH_SCORE = 4;
 
@@ -101,7 +101,7 @@ export async function runOneInstruction(
   // through every `await` via AsyncLocalStorage so helpers in run-yaml-flow.ts
   // can read it without us having to thread a new parameter through
   // executeStep + 6 helper signatures. `undefined` is the normal case for
-  // non-SDK callers (playground, YAML, replayer) → no behavior change.
+  // non-SDK callers (TUI, YAML, replayer) → no behavior change.
   return locatorCacheStorage.run(options?.locatorCache, () =>
     runOneInstructionInner(mcp, instruction, options)
   );

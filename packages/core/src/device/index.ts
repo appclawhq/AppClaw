@@ -30,7 +30,7 @@ export interface DeviceSetupArgs {
   config: AppClawConfig;
   /**
    * Always show the device picker even when a single device is available or the platform
-   * is pre-selected. Used by playground mode so the user always gets to choose a device.
+   * is pre-selected. Used by the step-recorder surfaces so the user always picks a device.
    */
   alwaysPickDevice?: boolean;
   /**

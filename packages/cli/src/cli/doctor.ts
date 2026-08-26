@@ -340,6 +340,9 @@ async function checkHandshake(
 }
 
 export async function runDoctor(args: string[]): Promise<number> {
+  // Module-global tallies must reset — the TUI's /doctor command makes this
+  // re-entrant within one process.
+  counts.ok = counts.warn = counts.fail = 0;
   const parsed = parseArgs(args);
   if (parsed.help) {
     printHelp();

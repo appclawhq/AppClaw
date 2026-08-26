@@ -1027,7 +1027,7 @@ async function executeMetaTool(
 ): Promise<ActionResult> {
   /**
    * Scale LLM-provided 0-1000 normalized coordinates to device space.
-   * Uses the same scaleCoordinates() from df-vision that the playground uses —
+   * Uses the same scaleCoordinates() from df-vision that the step recorders use —
    * guarantees identical coordinate handling across both paths.
    *
    * Note: df-vision convention is [y, x] order for coordinates.
@@ -1073,7 +1073,7 @@ async function executeMetaTool(
           const skipFastTapCoords = shouldPreferVisionLocateTap(selector);
 
           // Fast path: LLM provided 0-1000 normalized coordinates — skip vision locate entirely
-          // Uses same scaleCoordinates() from df-vision as the playground
+          // Uses same scaleCoordinates() from df-vision as the step recorders
           if (tapX != null && tapY != null && !skipFastTapCoords) {
             const scaled = await scaleLLMCoords(tapX, tapY);
             const tapped = await tapAtCoordinates(mcp, scaled.x, scaled.y);

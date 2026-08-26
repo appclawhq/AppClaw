@@ -576,7 +576,8 @@ export function printInteractiveHeader(): void {
     `${theme.info('--record')}     ${theme.muted('Record actions for replay')}`,
     `${theme.info('--replay')}     ${theme.muted('Replay a recorded flow')}`,
     `${theme.info('--flow')}       ${theme.muted('Run steps from a YAML file')}`,
-    `${theme.info('--playground')} ${theme.muted('Build YAML flows interactively')}`,
+    `${theme.info('--tui')}        ${theme.muted('Terminal Studio: record steps, mirror device')}`,
+    `${theme.info('--playground')} ${theme.muted('Alias for --tui')}`,
     `${theme.info('--plan')}       ${theme.muted('Decompose complex goals')}`,
     `${theme.info('--explore')}    ${theme.muted('Generate flows from a PRD')}`,
   ].join('\n');

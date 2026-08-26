@@ -1,5 +1,5 @@
 /**
- * Hybrid single-call vision executor for the playground.
+ * Hybrid single-call vision executor for the step recorders.
  *
  * In vision mode (AGENT_MODE=vision), takes a screenshot + raw instruction
  * and sends ONE LLM call to Stark Vision's `understandAndLocate()`.
@@ -460,7 +460,7 @@ export interface VisionExecuteResult {
   /**
    * How directly the user's instruction described the located element (1–10).
    * Comes from the LLM's matchScore in the combinedInstructionPrompt response.
-   * Low score = instruction was vague/sloppy → playground should refine the YAML verbatim.
+   * Low score = instruction was vague/sloppy → the caller should refine the YAML verbatim.
    * High score = instruction was intentional/accurate → keep as-is.
    */
   matchScore?: number;

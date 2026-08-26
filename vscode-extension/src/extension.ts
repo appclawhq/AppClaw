@@ -548,18 +548,21 @@ export function activate(context: vscode.ExtensionContext): void {
     })
   );
 
-  // Playground — opens an interactive REPL in the integrated terminal
+  // Terminal Studio — the full-screen Ink app, in the integrated terminal. Not
+  // to be confused with the device panel's "Playground" mode, which is the
+  // headless `--json --playground` NDJSON bridge in bridge.ts. The command id
+  // stays `appclaw.playground` so existing keybindings keep working.
   context.subscriptions.push(
     vscode.commands.registerCommand('appclaw.playground', () => {
       const { command, baseArgs } = getCliCommand();
       const env = getEnvFromSettings();
 
       const terminal = vscode.window.createTerminal({
-        name: 'AppClaw Playground',
+        name: 'AppClaw Terminal Studio',
         env,
       });
       terminal.show();
-      terminal.sendText(`${command} ${baseArgs.join(' ')} --playground`.trim());
+      terminal.sendText(`${command} ${baseArgs.join(' ')} --tui`.trim());
     })
   );
 

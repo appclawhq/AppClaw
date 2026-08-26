@@ -85,12 +85,17 @@ const envSchema = z.object({
   LOG_DIR: z.string().default('logs'),
 
   /**
-   * Default directory for exported SDK test specs (from `--export` and the
-   * playground's `/export <name>.test.ts`). Bare filenames land here; paths
-   * with a directory component (e.g. `./tests/foo.test.ts` or `/abs/path`)
-   * are used verbatim. Override per-run via the `--export-dir` CLI flag.
+   * Default directory for exported test specs (from `--export` and `/export
+   * <name>.test.ts`). Bare filenames land here; paths with a directory
+   * component (e.g. `./tests/foo.test.ts` or `/abs/path`) are used verbatim.
+   * Override per-run via the `--export-dir` CLI flag.
+   *
+   * Defaults to the runner's own `testDir` so an export is runnable where it
+   * lands: `appclaw-runner` discovers specs under `testDir` and takes filters,
+   * not paths, so a file written outside it could never be run without being
+   * moved first.
    */
-  EXPORT_DIR: z.string().default('.appclaw/exports'),
+  EXPORT_DIR: z.string().default('tests'),
 
   /** Gemini API key for Stark vision (optional if GEMINI_API_KEY is set). */
   STARK_VISION_API_KEY: z.string().default(''),

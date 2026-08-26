@@ -1,5 +1,5 @@
 /**
- * Per-step result printer shared by the playground and the SDK.
+ * Per-step result printer shared by the CLI's step recorders and the SDK.
  *
  * Renders a single executed step in the compact two-line form:
  *
@@ -7,7 +7,7 @@
  *     ●  Tapped "search icon" at [432, 421]
  *
  * Extracted here so callers don't have to reimplement the formatting. The
- * playground uses it for interactive REPL feedback; `src/sdk/step-runner.ts`
+ * CLI uses it for interactive step feedback; `src/sdk/step-runner.ts`
  * uses it so SDK consumers see what's happening on the device without having
  * to enable verbose logging.
  */
@@ -121,7 +121,7 @@ export function stepTarget(step: FlowStep): string {
 }
 
 /**
- * Print one step's result in the two-line compact form used by the playground
+ * Print one step's result in the two-line compact form used by the step recorders
  * and the SDK. Goes to stdout — no spinners, no progress bars, safe for CI logs.
  */
 export function printStepResult(

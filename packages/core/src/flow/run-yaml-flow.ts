@@ -876,7 +876,7 @@ function isVisionMode(): boolean {
 // ─── SDK locator cache helpers ──────────────────────────────────────────────
 //
 // These run only when an SDK caller opted into `locatorCache`. For YAML-flow,
-// playground, and goal-agent paths the active context is always undefined and
+// step-recorder, and goal-agent paths the active context is always undefined and
 // every helper below short-circuits — behavior unchanged.
 
 /** Build a cache key from the current page source + the action being performed. */
@@ -2267,7 +2267,7 @@ async function executeStepUnredacted(
   scroll?: ScrollControl
 ): Promise<ActionResult> {
   // Vision mode: natural language steps (verbatim set) use visionExecute with the original
-  // instruction — same path as the playground — for precise context-aware element location.
+  // instruction — same path as the step recorders — for precise context-aware element location.
   // Explicit YAML steps (no verbatim) fall through to the normal DOM/vision-locate paths.
   if (
     isVisionMode() &&
@@ -2373,7 +2373,7 @@ async function executeStepUnredacted(
       } else {
         // No name: close the current foreground app. Read it from the live page
         // source (its package), falling back to session state — so this works even
-        // when the locator cache isn't active (playground / SDK).
+        // when the locator cache isn't active (step recorder / SDK).
         const pageSource = await getPageSource(mcp).catch(() => '');
         pkg =
           extractAppIdFromDom(pageSource) ??

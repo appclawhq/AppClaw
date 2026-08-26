@@ -3,7 +3,7 @@
  * adapts the result for the SDK's report + console-print conventions.
  *
  * The execution pipeline itself (vision-first → regex → LLM → executeStep)
- * lives in `src/flow/run-instruction.ts` and is shared with the playground.
+ * lives in `src/flow/run-instruction.ts` and is shared with the CLI's step recorders.
  * This module's job is only:
  *   - mark the step start on the report collector
  *   - record a step row + screenshot in the report
@@ -41,7 +41,7 @@ export class StepRunner {
     /**
      * When true, suppress the per-step `✓ #N tap "label"` log line.
      * Default false — SDK consumers want to see what's happening on the device,
-     * matching the playground's visibility. Pass true to silence (e.g. for noisy
+     * matching the TUI's visibility. Pass true to silence (e.g. for noisy
      * CI logs where the test framework already reports per-test outcomes).
      */
     private readonly silent: boolean = false,
@@ -69,7 +69,7 @@ export class StepRunner {
     setPreActionCapture(!!this.collector);
 
     // All "instruction → step → executed" logic lives in runOneInstruction so
-    // the SDK and playground stay in lockstep. See src/flow/run-instruction.ts.
+    // the SDK and the step recorders stay in lockstep. See src/flow/run-instruction.ts.
     const { step, result } = await runOneInstruction(this.mcp, instruction, {
       appResolver: this.appResolver,
       tapPoll: this.tapPoll,

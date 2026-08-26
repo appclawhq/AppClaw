@@ -109,7 +109,7 @@ export interface AppClawOptions {
   /**
    * Suppress per-step log lines (`✓ #1 tap "search icon"` etc.).
    * Defaults to `false` — SDK consumers see device activity by default,
-   * matching the playground's UX. Set `true` for a quiet test run where the
+   * matching the TUI's UX. Set `true` for a quiet test run where the
    * surrounding framework (vitest/jest) already reports per-test outcomes.
    */
   silent?: boolean;

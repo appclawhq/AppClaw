@@ -50,7 +50,7 @@ import { getStarkVisionModel } from '@appclaw/core/vision/locate-enabled';
 import { prepareScreenshotForLlm } from '@appclaw/core/vision/prepare-screenshot-for-llm';
 import { runExplorer } from './explorer/index.js';
 import type { ExplorerConfig } from './explorer/types.js';
-import { runPlayground } from './playground/index.js';
+import { runTui } from './tui/index.js';
 import { setupDevice } from '@appclaw/core/device/index';
 import { loadAppGuide } from '@appclaw/core/appguides/index';
 import * as ui from '@appclaw/core/ui/terminal';
@@ -67,6 +67,7 @@ interface CLIArgs {
   replay: string | null;
   flow: string | null;
   playground: boolean;
+  tui: boolean;
   plan: boolean;
   explore: string | null;
   report: boolean;
@@ -86,7 +87,7 @@ interface CLIArgs {
   env: string | null;
   /**
    * Path to a dotenv (`KEY=value`) file to load into `process.env` before the
-   * run starts. Useful for the playground/goal modes when the `.env` lives
+   * run starts. Useful for the TUI/goal modes when the `.env` lives
    * outside the current working directory. Values override the process env.
    * Named `--env-path` (not `--env-file`) to avoid colliding with Node's own
    * reserved `--env-file` CLI flag.
@@ -163,7 +164,10 @@ function printHelp(): void {
     `    ${c.flag('--caps')} ${c.arg('<path>')}                ${c.desc('JSON file of extra Appium capabilities merged into the session')}`
   );
   console.log(
-    `    ${c.flag('--playground')}                    ${c.desc('Interactive REPL for building flows')}`
+    `    ${c.flag('--tui')}                          ${c.desc('Terminal Studio: step recorder, device picker, device stream')}`
+  );
+  console.log(
+    `    ${c.flag('--playground')}                    ${c.desc('Alias for --tui (with --json: headless NDJSON bridge for IDEs)')}`
   );
   console.log(
     `    ${c.flag('--explore')} ${c.arg('<prd>')}              ${c.desc('Generate test flows from a PRD')}`
@@ -226,11 +230,11 @@ function printHelp(): void {
     `    ${c.example('appclaw --platform ios --device-type real --udid 00008120-XXXX "Open Settings"')}`
   );
   console.log();
-  console.log(`    ${c.comment('# Playground on iOS')}`);
-  console.log(`    ${c.example('appclaw --playground --platform ios --device-type simulator')}`);
+  console.log(`    ${c.comment('# Interactive shell on iOS')}`);
+  console.log(`    ${c.example('appclaw --tui --platform ios --device-type simulator')}`);
   console.log();
-  console.log(`    ${c.comment('# Playground with a custom .env file')}`);
-  console.log(`    ${c.example('appclaw --playground --env-path path/to/.env')}`);
+  console.log(`    ${c.comment('# Interactive shell with a custom .env file')}`);
+  console.log(`    ${c.example('appclaw --tui --env-path path/to/.env')}`);
   console.log();
   console.log(`    ${c.comment('# YAML flow on Android')}`);
   console.log(`    ${c.example('appclaw --flow examples/flows/google-search.yaml')}`);
@@ -280,6 +284,7 @@ function parseArgs(): CLIArgs {
   let replay: string | null = null;
   let flow: string | null = null;
   let playground = false;
+  let tui = false;
   let plan = false;
   let explore: string | null = null;
   let report = false;
@@ -332,6 +337,8 @@ function parseArgs(): CLIArgs {
       flow = args[++i] ?? null;
     } else if (args[i] === '--playground') {
       playground = true;
+    } else if (args[i] === '--tui') {
+      tui = true;
     } else if (args[i] === '--plan') {
       plan = true;
     } else if (args[i] === '--explore') {
@@ -390,6 +397,7 @@ function parseArgs(): CLIArgs {
     replay,
     flow,
     playground,
+    tui,
     plan,
     explore,
     report,
@@ -545,21 +553,45 @@ async function main() {
     return;
   }
 
-  // ─── Playground mode (interactive REPL → YAML) ───────────
-  if (cliArgs.playground) {
-    // JSON playground for IDE extensions
+  // ─── Headless step-recorder bridge (`--json --playground`) ───
+  //
+  // The only surviving non-interactive `--playground` behaviour: the VS Code /
+  // Cursor extension spawns this and speaks NDJSON over stdio, so the protocol
+  // is a shipped contract. Checked before the TUI block so the interactive form
+  // of `--playground` falls through to it as an alias.
+  if (cliArgs.playground && isJsonMode()) {
+    const { runPlaygroundJson } = await import('./step-recorder/json-bridge.js');
+    await runPlaygroundJson({
+      platform: cliArgs.platform,
+      deviceType: cliArgs.deviceType,
+      udid: cliArgs.deviceUdid,
+      deviceName: cliArgs.deviceName,
+      exportDir: cliArgs.exportDir,
+    });
+    return;
+  }
+
+  // ─── Terminal Studio (multi-screen Ink app + device stream) ─
+  //
+  // `--playground` is an alias: the interactive REPL it used to start has been
+  // replaced by this shell, which records the same step list.
+  if (cliArgs.tui || cliArgs.playground) {
     if (isJsonMode()) {
-      const { runPlaygroundJson } = await import('./playground/index.js');
-      await runPlaygroundJson({
-        platform: cliArgs.platform,
-        deviceType: cliArgs.deviceType,
-        udid: cliArgs.deviceUdid,
-        deviceName: cliArgs.deviceName,
-        exportDir: cliArgs.exportDir,
-      });
-      return;
+      // silenceTerminalUI() has already filtered stdout to JSON-shaped lines,
+      // which would swallow every Ink frame — write the refusal to stderr.
+      process.stderr.write(
+        '--tui cannot be combined with --json (there is no machine-readable TUI mode).\n'
+      );
+      process.exit(1);
     }
-    await runPlayground({
+    if (!process.stdout.isTTY || !process.stdin.isTTY) {
+      ui.printError(
+        '--tui requires an interactive terminal',
+        'It uses raw-mode keyboard input, so it cannot run piped, in CI, or with stdin redirected.'
+      );
+      process.exit(1);
+    }
+    await runTui({
       platform: cliArgs.platform,
       deviceType: cliArgs.deviceType,
       udid: cliArgs.deviceUdid,

@@ -80,7 +80,7 @@
       },
       {
         "command": "appclaw.playground",
-        "title": "AppClaw: Start Playground",
+        "title": "AppClaw: Start Terminal Studio",
         "icon": "$(terminal)"
       },
       {

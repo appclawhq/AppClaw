@@ -4,7 +4,7 @@
  * After `app.runGoal(goal)` finishes, the agent leaves behind a `history` of
  * tool-call decisions (find_and_click, find_and_type, launch_app, …). This
  * module translates those decisions back into the natural-language form that
- * `app.run(...)` accepts, then renders a complete vitest spec file.
+ * `app.run(...)` accepts, then renders a complete @appclaw/runner spec file.
  *
  * Why translate back to natural language instead of dumping raw tool calls?
  * The SDK's `app.run()` is the supported public surface — `find_and_click` is
@@ -20,13 +20,16 @@ export interface GenerateSdkTestConfig {
   provider?: string;
   platform?: string;
   agentMode?: string;
-  /** Module path used in the generated `import { AppClaw } from '<...>'`. Default: 'appclaw'. */
+  /** Module path for the generated `import { test } from '<...>'`. Default: '@appclaw/runner'. */
   sdkImport?: string;
-  /** `describe(...)` block title. Default: 'Goal replay'. */
+  /** Prefixed onto the test title when set (e.g. from `/meta name`). */
   describeName?: string;
-  /** `it(...)` test title. Default: the goal text. */
+  /** `test(...)` title. Default: derived from the recorded steps. */
   testName?: string;
-  /** vitest timeout in ms. Default: 120000. */
+  /**
+   * Unused. The runner takes its per-test timeout from `appclaw.config.ts` or
+   * `--timeout`, so a literal in the spec would be ignored.
+   */
   timeoutMs?: number;
 }
 
@@ -105,7 +108,7 @@ export function keepOnlyFinalAttempt(history: StepRecord[]): StepRecord[] {
 }
 
 /**
- * Build a descriptive `it(...)` test name from the recorded instructions.
+ * Build a descriptive `test(...)` name from the recorded instructions.
  * Prefers anchors that tell a story: the launched app + the final user action,
  * e.g. "launches YouTube and taps search icon". Falls back to "executes <N>
  * recorded steps" when the trajectory doesn't have a clean anchor.
@@ -148,9 +151,9 @@ export function instructionsFromHistory(history: StepRecord[]): string[] {
 }
 
 /**
- * Render a complete vitest spec file that replays the agent's trajectory via
- * `app.run(...)` calls. The output is ready to write to disk and run with
- * `vitest run path/to/file`.
+ * Render a complete @appclaw/runner spec that replays the agent's trajectory
+ * via `app.run(...)` calls. Write it under the runner's `testDir` and it is
+ * picked up by `appclaw test`.
  */
 export function generateSdkTest(opts: {
   goal: string;
@@ -166,9 +169,9 @@ export function generateSdkTest(opts: {
 }
 
 /**
- * Render a vitest spec from a flat list of natural-language instructions.
+ * Render a runner spec from a flat list of natural-language instructions.
  *
- * Used by the playground (`/export some.test.ts`) where steps are already in
+ * Used by `/export some.test.ts` where steps are already in
  * `app.run()`-ready form — no agent history to translate. The optional `goal`
  * is purely for the header comment; pass empty string if there's no concept
  * of a goal (interactive sessions).
@@ -193,32 +196,36 @@ function renderSdkTest(opts: {
 }): string {
   const cfg = opts.config ?? {};
   const { instructions, goal } = opts;
-  const sdkImport = cfg.sdkImport ?? 'appclaw';
-  const describeName = cfg.describeName ?? 'Recorded flow';
+  const runnerImport = cfg.sdkImport ?? '@appclaw/runner';
   // Default test name describes what the steps DO, not what the goal asked for.
   // The original goal is preserved in the file header comment for traceability.
   const testName = cfg.testName ?? defaultTestNameFromSteps(instructions);
-  const timeoutMs = cfg.timeoutMs ?? 120000;
+  // The runner has no `describe` requirement, so the group name (when the user
+  // set one via /meta name) is folded into the title rather than wrapping the
+  // file in a block that exists only to hold one test.
+  const describeName = cfg.describeName ?? '';
+  const testTitle =
+    describeName && describeName !== 'Recorded flow' ? `${describeName} — ${testName}` : testName;
   const agentStepsUsed = opts.agentStepsUsed;
 
-  const optionLines: string[] = [];
-  if (cfg.provider) optionLines.push(`      provider: ${JSON.stringify(cfg.provider)},`);
-  optionLines.push(`      apiKey: process.env.LLM_API_KEY,`);
-  if (cfg.platform) optionLines.push(`      platform: ${JSON.stringify(cfg.platform)},`);
-  if (cfg.agentMode) optionLines.push(`      agentMode: ${JSON.stringify(cfg.agentMode)},`);
+  // Provider, apiKey and agentMode are not written into the spec any more: the
+  // runner owns the session, and those belong in appclaw.config.ts where one
+  // change covers every test. Platform is the exception — it selects which
+  // devices a test is eligible for, so it stays per-test.
+  const testOptions = cfg.platform ? `{ platform: ${JSON.stringify(cfg.platform)} }, ` : '';
 
-  const runLines = instructions.map((i) => `    await app.run(${JSON.stringify(i)});`);
+  const runLines = instructions.map((i) => `  await app.run(${JSON.stringify(i)});`);
 
   const fromAgent = agentStepsUsed !== undefined;
   const goalLine = goal.trim()
     ? `Original goal: ${goal.replace(/\*\//g, '*\\/')}`
-    : 'Source: AppClaw playground';
+    : 'Source: AppClaw recording session';
   const stepsLine = fromAgent
     ? `Steps recorded: ${instructions.length} (from ${agentStepsUsed} agent step${agentStepsUsed === 1 ? '' : 's'})`
     : `Steps recorded: ${instructions.length}`;
 
   // Caveats vary by source: agent-mode exports inherit non-determinism from the
-  // LLM trajectory; playground exports are user-validated steps and only need a
+  // LLM trajectory; recorded exports are user-validated steps and only need a
   // brief reminder that selectors may drift across UI revisions.
   const caveats = fromAgent
     ? [
@@ -238,19 +245,19 @@ function renderSdkTest(opts: {
         '   cross-check against the AgentResult.history.',
         '',
         '4. Edit freely. Treat this file as a draft: rename the test, add assertions',
-        '   (`app.verify(...)`), tighten selectors, split into multiple `it()` blocks.',
+        '   (`app.verify(...)`), tighten selectors, split into multiple `test()` blocks.',
       ]
     : [
-        '1. Each step is the verbatim text you typed in the playground — exactly',
-        '   what `AppClaw.run()` will receive. There is no translator in between,',
-        '   so the replay should behave identically to the playground session.',
+        '1. Each step is the verbatim text you typed — exactly what `app.run()`',
+        '   will receive. There is no translator in between, so the replay should',
+        '   behave identically to the session it was recorded in.',
         '',
         '2. Selectors are still locator strings, not stable IDs. If the app UI',
         '   changes (icons relabelled, layout shifts), the natural-language',
         '   selectors above may need updating.',
         '',
         '3. Edit freely. Treat this file as a draft: rename the test, add',
-        '   assertions (`app.verify(...)`), split into multiple `it()` blocks.',
+        '   assertions (`app.verify(...)`), split into multiple `test()` blocks.',
       ];
 
   const caveatBlock = caveats.map((l) => ` * ${l}`.replace(/ +$/, '')).join('\n');
@@ -265,20 +272,10 @@ function renderSdkTest(opts: {
  *
 ${caveatBlock}
  */
-import { AppClaw } from ${JSON.stringify(sdkImport)};
-import { describe, it } from 'vitest';
-import 'dotenv/config';
+import { test } from ${JSON.stringify(runnerImport)};
 
-describe(${JSON.stringify(describeName)}, () => {
-  it(${JSON.stringify(testName)}, async () => {
-    const app = new AppClaw({
-${optionLines.join('\n')}
-    });
-
+test(${JSON.stringify(testTitle)}, ${testOptions}async ({ app }) => {
 ${runLines.join('\n')}
-
-    await app.teardown();
-  }, ${timeoutMs});
 });
 `;
 }

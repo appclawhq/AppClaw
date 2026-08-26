@@ -1247,6 +1247,160 @@
           animation: none;
         }
       }
+
+      /* ── TUI layout diagram ────────────────────────────────────────────
+         A picture of the shell rather than ASCII art in a code block: the real
+         thing is coloured and proportioned, and box-drawing characters
+         reflow badly on narrow screens. Colours mirror the TUI's own theme. */
+      .tui-diagram {
+        --tui-bg: #14161b;
+        --tui-brand: #fc8eac;
+        --tui-dim: #6b7280;
+        --tui-step: #9cc6f5;
+        --tui-green: #46c26a;
+        --tui-text: #e6e6e6;
+        background: var(--tui-bg);
+        border: 1px solid var(--rule-strong);
+        border-radius: 10px;
+        overflow: hidden;
+        margin: 1.5rem 0;
+        font-family: var(--font-mono);
+        font-size: 0.78rem;
+        line-height: 1.7;
+      }
+      .tui-diagram .tui-bar {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.55rem 0.85rem;
+        background: rgba(255, 255, 255, 0.04);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      }
+      .tui-diagram .tui-bar i {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.18);
+        display: inline-block;
+      }
+      .tui-diagram .tui-bar span {
+        color: var(--tui-dim);
+        margin-left: 0.35rem;
+      }
+      .tui-diagram .tui-head {
+        padding: 0.7rem 1rem 0.2rem;
+        color: var(--tui-brand);
+        font-weight: 600;
+      }
+      .tui-diagram .tui-head em {
+        display: block;
+        color: var(--tui-dim);
+        font-style: normal;
+        font-weight: 400;
+      }
+      .tui-diagram .tui-cols {
+        display: flex;
+        gap: 0.75rem;
+        padding: 0.6rem 1rem 1rem;
+        align-items: stretch;
+      }
+      .tui-diagram .tui-left {
+        flex: 0 0 45%;
+        display: flex;
+        flex-direction: column;
+        gap: 0.6rem;
+        min-width: 0;
+      }
+      .tui-diagram .tui-right {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+      }
+      .tui-diagram .pane {
+        border: 1px solid rgba(252, 142, 172, 0.35);
+        border-radius: 6px;
+        padding: 0.5rem 0.7rem;
+        min-width: 0;
+      }
+      .tui-diagram .pane.muted {
+        border-color: rgba(255, 255, 255, 0.14);
+      }
+      .tui-diagram .pane .t {
+        color: var(--tui-dim);
+        display: block;
+        margin-bottom: 0.25rem;
+      }
+      .tui-diagram .pane.stream {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+      }
+      .tui-diagram .screen {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 190px;
+      }
+      .tui-diagram .phone {
+        width: 74px;
+        height: 152px;
+        border-radius: 9px;
+        border: 1px solid rgba(255, 255, 255, 0.22);
+        background: linear-gradient(170deg, #26303e 0%, #171b22 60%);
+        position: relative;
+      }
+      .tui-diagram .phone::after {
+        content: '';
+        position: absolute;
+        left: 50%;
+        bottom: 7px;
+        width: 26px;
+        height: 2px;
+        border-radius: 2px;
+        transform: translateX(-50%);
+        background: rgba(255, 255, 255, 0.3);
+      }
+      .tui-diagram .line {
+        color: var(--tui-text);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .tui-diagram .in {
+        color: var(--tui-brand);
+      }
+      .tui-diagram .ok {
+        color: var(--tui-green);
+      }
+      .tui-diagram .cmd {
+        color: var(--tui-step);
+      }
+      .tui-diagram .dim {
+        color: var(--tui-dim);
+      }
+      .tui-diagram .prompt .in {
+        margin-right: 0.4rem;
+      }
+      .tui-diagram .note {
+        border-top: 1px solid rgba(255, 255, 255, 0.08);
+        padding: 0.5rem 1rem 0.65rem;
+        color: var(--tui-dim);
+        display: flex;
+        gap: 1.25rem;
+        flex-wrap: wrap;
+      }
+      @media (max-width: 720px) {
+        .tui-diagram .tui-cols {
+          flex-direction: column;
+        }
+        .tui-diagram .tui-left {
+          flex: 1 1 auto;
+        }
+        .tui-diagram .screen {
+          min-height: 150px;
+        }
+      }
     </style>
   </head>
   <body>
@@ -1352,6 +1506,7 @@
             <li><a href="#quick-start">Quick Start</a></li>
             <li><a href="#cli-options">CLI Options</a></li>
             <li><a href="#execution-modes">Execution Modes</a></li>
+            <li><a href="#terminal-studio">Terminal Studio</a></li>
           </ul>
         </div>
 
@@ -1588,8 +1743,8 @@
 <span class="c"># Run a YAML flow</span>
 <span class="k">appclaw</span> <span class="fl">--flow</span> my-test.yaml
 
-<span class="c"># Interactive playground</span>
-<span class="k">appclaw</span> <span class="fl">--playground</span></pre>
+<span class="c"># Interactive shell</span>
+<span class="k">appclaw</span> <span class="fl">--tui</span></pre>
           </div>
           <p>
             For a full test project — config file, spec files, npm scripts — scaffold it with
@@ -1787,12 +1942,16 @@
                 </td>
               </tr>
               <tr>
+                <td>--tui</td>
+                <td>Launch Terminal Studio — step recorder, device picker, device mirroring</td>
+              </tr>
+              <tr>
                 <td>--playground</td>
-                <td>Launch the interactive REPL for building flows</td>
+                <td>Alias for <code>--tui</code></td>
               </tr>
               <tr>
                 <td>--export [path]</td>
-                <td>Write a replayable SDK vitest spec after a goal completes</td>
+                <td>Write a replayable @appclaw/runner spec after a goal completes</td>
               </tr>
               <tr>
                 <td>--export-dir &lt;dir&gt;</td>
@@ -1877,44 +2036,359 @@
             <pre><span class="k">appclaw</span> <span class="fl">--flow</span> tests/youtube-search.yaml <span class="fl">--env</span> dev</pre>
           </div>
 
-          <h3><span class="badge badge-purple">Playground</span></h3>
+          <h3><span class="badge badge-purple">Terminal Studio</span></h3>
           <p>
-            An interactive REPL where you type one instruction at a time and see it execute
-            immediately. Great for exploring an app and building flows interactively.
+            A full-screen terminal workspace where you type one instruction at a time and see it
+            execute immediately, alongside a device picker, a slash-command palette and optional
+            device mirroring. Great for exploring an app and building flows interactively.
+            <code>--playground</code> is an alias for it.
+          </p>
+          <p>
+            <strong>Requirements.</strong> The shell itself needs only an interactive terminal (at
+            least 27 rows — it will tell you if the window is too small). The optional device
+            mirroring is Android-only: <code>/stream</code> mirrors the screen <em>inside</em> the
+            shell. Terminals that support the kitty graphics protocol (Ghostty, kitty, WezTerm) show
+            real pixels; everywhere else falls back to coloured half-block characters. No install
+            needed.
           </p>
           <div class="code-block">
             <div class="code-block-header">
               <div class="code-block-dots"><span></span><span></span><span></span></div>
-              <span class="code-block-label">Playground</span>
+              <span class="code-block-label">Terminal Studio</span>
             </div>
-            <pre><span class="k">appclaw</span> <span class="fl">--playground</span> <span class="fl">--platform</span> ios <span class="fl">--device-type</span> simulator</pre>
+            <pre><span class="k">appclaw</span> <span class="fl">--tui</span> <span class="fl">--platform</span> ios <span class="fl">--device-type</span> simulator</pre>
           </div>
           <p>
             When you're happy with the recorded steps, type <code>/export</code> to save them. By
-            default this writes an <strong>SDK vitest spec</strong> (<code>.test.ts</code>); pass a
-            <code>.yaml</code> filename to export a YAML flow instead.
+            default this writes an <strong>@appclaw/runner spec</strong> (<code>.spec.ts</code>);
+            pass a <code>.yaml</code> filename to export a YAML flow instead.
           </p>
           <div class="code-block">
             <div class="code-block-header">
               <div class="code-block-dots"><span></span><span></span><span></span></div>
-              <span class="code-block-label">Exporting from the REPL</span>
+              <span class="code-block-label">Exporting from the shell</span>
             </div>
-            <pre><span class="c"># In the REPL prompt:</span>
-/export                  <span class="c"># → SDK vitest spec (flow-&lt;ts&gt;.test.ts)</span>
-/export login.test.ts    <span class="c"># → SDK vitest spec</span>
+            <pre><span class="c"># At the shell prompt:</span>
+/export                  <span class="c"># → runner spec (flow-&lt;ts&gt;.spec.ts)</span>
+/export login.spec.ts    <span class="c"># → runner spec, run with: appclaw test login</span>
 /export login.yaml       <span class="c"># → YAML flow</span></pre>
           </div>
           <p>
-            Bare-filename exports land in <code>EXPORT_DIR</code> (default
-            <code>.appclaw/exports</code>). Override it per run with <code>--export-dir</code>, and
-            load a custom <code>.env</code> with <code>--env-path</code>:
+            Bare-filename exports land in <code>EXPORT_DIR</code> (default <code>tests</code>, the
+            runner's own testDir, so an export is runnable where it lands). Override it per run with
+            <code>--export-dir</code>, and load a custom <code>.env</code> with
+            <code>--env-path</code>:
           </p>
           <div class="code-block">
             <div class="code-block-header">
               <div class="code-block-dots"><span></span><span></span><span></span></div>
-              <span class="code-block-label">Playground with overrides</span>
+              <span class="code-block-label">Terminal Studio with overrides</span>
             </div>
-            <pre><span class="k">appclaw</span> <span class="fl">--playground</span> <span class="fl">--env-path</span> path/to/.env <span class="fl">--export-dir</span> tests/generated</pre>
+            <pre><span class="k">appclaw</span> <span class="fl">--tui</span> <span class="fl">--env-path</span> path/to/.env <span class="fl">--export-dir</span> tests/generated</pre>
+          </div>
+        </section>
+
+        <!-- ============================================ -->
+        <!-- INTERACTIVE SHELL (TUI)                      -->
+        <!-- ============================================ -->
+        <section id="terminal-studio" class="reveal">
+          <h2>Terminal Studio</h2>
+          <p>
+            <code>appclaw --tui</code> is a full-screen terminal workspace for building a flow by
+            hand: you type one instruction at a time, it runs on the device immediately, and every
+            step that succeeds is recorded. When the flow looks right, <code>/export</code> turns it
+            into a runnable spec. <code>--playground</code> is an alias for it.
+          </p>
+
+          <h3>The layout</h3>
+          <p>
+            Two columns. On the left, a scrollable transcript of everything that has run, the
+            command palette, and the prompt. On the right, the device screen, mirrored live.
+          </p>
+          <div class="tui-diagram">
+            <div class="tui-bar"><i></i><i></i><i></i><span>appclaw --tui</span></div>
+            <div class="tui-head">
+              ◆ AppClaw
+              <em>android · Pixel 8 · 4 steps recorded</em>
+            </div>
+            <div class="tui-cols">
+              <div class="tui-left">
+                <div class="pane muted">
+                  <span class="t">Transcript</span>
+                  <div class="line in">open youtube</div>
+                  <div class="line">
+                    <span class="ok">✓</span> open youtube <span class="dim">(1.4s)</span>
+                  </div>
+                  <div class="line dim">Launched youtube</div>
+                  <div class="line in">tap search</div>
+                  <div class="line">
+                    <span class="ok">✓</span> tap "search" <span class="dim">(159ms)</span>
+                  </div>
+                </div>
+                <div class="pane">
+                  <span class="t">Command palette</span>
+                  <div class="line">
+                    <span class="cmd">/list</span> <span class="dim">List all recorded steps</span>
+                  </div>
+                  <div class="line">
+                    <span class="cmd">/export</span> <span class="dim">Export steps</span>
+                  </div>
+                  <div class="line dim">… +14 more — type / to filter</div>
+                </div>
+                <div class="pane muted prompt">
+                  <span class="in">❯</span><span class="dim">type a step or /command</span>
+                </div>
+              </div>
+              <div class="tui-right">
+                <div class="pane stream">
+                  <span class="t">Device stream <span class="dim">· kitty graphics</span></span>
+                  <div class="screen"><div class="phone"></div></div>
+                </div>
+              </div>
+            </div>
+            <div class="note">
+              <span>↑↓ history</span>
+              <span>tab complete</span>
+              <span>⇧tab focus</span>
+              <span>ctrl+c quit</span>
+            </div>
+          </div>
+
+          <h3>Recording steps</h3>
+          <p>
+            Anything you type that is <em>not</em> a slash command runs as a single deterministic
+            instruction and is appended to the recording. A step that fails is reported but not
+            recorded, so the flow you export only contains steps that actually worked.
+          </p>
+          <p>
+            <code>/goal &lt;text&gt;</code> is the exception: it hands the line to the autonomous
+            agent, which may take many steps to get there. Agent runs are <strong>not</strong>
+            recorded &mdash; use it to explore, then record the steps you settle on.
+          </p>
+
+          <h3>Commands</h3>
+          <p>
+            Type <code>/</code> to filter the palette; <code>Tab</code> completes. The full list is
+            in <code>/help</code>.
+          </p>
+          <table class="cmd-table">
+            <thead>
+              <tr>
+                <th>Command</th>
+                <th>What it does</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>/list</code></td>
+                <td>Show the recorded steps</td>
+              </tr>
+              <tr>
+                <td><code>/yaml</code> · <code>/preview</code></td>
+                <td>Preview the YAML flow or generated spec without saving</td>
+              </tr>
+              <tr>
+                <td><code>/export [file]</code></td>
+                <td>
+                  Write a runner spec (<code>.spec.ts</code>) or YAML flow (<code>.yaml</code>)
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <code>/undo</code> · <code>/edit</code> · <code>/insert</code> ·
+                  <code>/delete</code>
+                </td>
+                <td>Fix the recording without starting over</td>
+              </tr>
+              <tr>
+                <td><code>/meta</code></td>
+                <td>Set flow name, appId or platform</td>
+              </tr>
+              <tr>
+                <td><code>/goal &lt;text&gt;</code></td>
+                <td>Run the autonomous agent (not recorded)</td>
+              </tr>
+              <tr>
+                <td><code>/stream</code> · <code>/stream-close</code></td>
+                <td>Mirror the device in the side panel, or stop mirroring</td>
+              </tr>
+              <tr>
+                <td><code>/device</code> · <code>/platform</code></td>
+                <td>Switch device or platform mid-session</td>
+              </tr>
+              <tr>
+                <td><code>/settings</code> · <code>/history</code> · <code>/doctor</code></td>
+                <td>Edit <code>.env</code>, browse past runs, run the preflight</td>
+              </tr>
+              <tr>
+                <td><code>/session</code></td>
+                <td>Path to this session's JSON log</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <h3>Keys</h3>
+          <table class="cmd-table">
+            <thead>
+              <tr>
+                <th>Key</th>
+                <th>At the prompt</th>
+                <th>In the transcript</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>↑</code> <code>↓</code></td>
+                <td>Recall previous instructions</td>
+                <td>Scroll</td>
+              </tr>
+              <tr>
+                <td><code>Shift</code>+<code>Tab</code></td>
+                <td colspan="2">Move focus between the prompt and the transcript</td>
+              </tr>
+              <tr>
+                <td><code>Tab</code></td>
+                <td>Complete a slash command</td>
+                <td>&mdash;</td>
+              </tr>
+              <tr>
+                <td><code>Ctrl</code>+<code>C</code></td>
+                <td colspan="2">Quit (asks first if steps are unexported)</td>
+              </tr>
+            </tbody>
+          </table>
+          <p>
+            History is per-session and never written to disk. Typing any character while the
+            transcript has focus jumps back to the prompt and keeps the keystroke.
+          </p>
+
+          <h3 id="stream-requirements">Mirroring the device</h3>
+          <p>
+            <code>/stream</code> draws the device screen in the right-hand panel a few times a
+            second while the prompt stays usable. How it draws depends on your terminal, and it
+            always works &mdash; the only question is fidelity.
+          </p>
+          <table class="cmd-table">
+            <thead>
+              <tr>
+                <th>Requirement</th>
+                <th>Needed for</th>
+                <th>If missing</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Android device or emulator</td>
+                <td>Mirroring at all</td>
+                <td><code>/stream</code> refuses on iOS &mdash; use the Simulator window</td>
+              </tr>
+              <tr>
+                <td><code>adb</code> on PATH</td>
+                <td>Capturing frames (<code>adb exec-out screencap</code>)</td>
+                <td>Stream does not start</td>
+              </tr>
+              <tr>
+                <td>Kitty graphics protocol</td>
+                <td>Real pixels</td>
+                <td>Falls back to half-blocks automatically</td>
+              </tr>
+              <tr>
+                <td>24-bit colour</td>
+                <td>The half-block fallback</td>
+                <td>Colours are approximated by the terminal</td>
+              </tr>
+            </tbody>
+          </table>
+          <p>
+            <code>appclaw doctor</code> checks the first two rows &mdash; <code>adb</code> and a
+            connected Android device &mdash; and prints the exact commands for anything missing. The
+            last two only change fidelity, never whether the stream runs.
+          </p>
+
+          <h4>Which terminals give you real pixels</h4>
+          <p>
+            AppClaw picks the backend from environment variables rather than asking the terminal. A
+            capability probe would be answered on stdin, which the shell already holds in raw mode
+            &mdash; the reply would arrive as keystrokes. So detection is:
+          </p>
+          <table class="cmd-table">
+            <thead>
+              <tr>
+                <th>Terminal</th>
+                <th>Detected via</th>
+                <th>Result</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Ghostty</td>
+                <td><code>TERM_PROGRAM=ghostty</code></td>
+                <td>kitty graphics</td>
+              </tr>
+              <tr>
+                <td>kitty</td>
+                <td>
+                  <code>KITTY_WINDOW_ID</code>, or <code>TERM</code> containing <code>kitty</code>
+                </td>
+                <td>kitty graphics</td>
+              </tr>
+              <tr>
+                <td>WezTerm</td>
+                <td><code>WEZTERM_EXECUTABLE</code></td>
+                <td>kitty graphics</td>
+              </tr>
+              <tr>
+                <td>Everything else</td>
+                <td>&mdash;</td>
+                <td>ANSI half-blocks</td>
+              </tr>
+            </tbody>
+          </table>
+          <p>
+            That includes Terminal.app, iTerm2 and the VS Code terminal: they still stream, just as
+            coloured half-block characters &mdash; enough to see which screen you are on, not enough
+            to read small text. Multiplexers such as tmux and screen sit between AppClaw and the
+            terminal and generally will not pass graphics through, so expect the fallback there too.
+          </p>
+          <div class="code-block">
+            <div class="code-block-header">
+              <div class="code-block-dots"><span></span><span></span><span></span></div>
+              <span class="code-block-label">Force a backend</span>
+            </div>
+            <pre><span class="c"># Exercise the fallback on a terminal that supports graphics</span>
+<span class="k">APPCLAW_STREAM_BACKEND</span>=halfblock <span class="k">appclaw</span> <span class="fl">--tui</span></pre>
+          </div>
+          <p>
+            <code>/stream-close</code> stops the mirror and hands the panel back; switching device
+            or quitting stops it for you.
+          </p>
+
+          <h3>Session log</h3>
+          <p>
+            Every session writes <code>.appclaw/sessions/&lt;id&gt;.json</code> as it goes &mdash;
+            each instruction, what it resolved to, how long it took, and the failures that never
+            became steps. It is rewritten after every event, so a crash still leaves a readable
+            file, and past sessions show up in <code>/history</code> alongside YAML flow runs.
+          </p>
+
+          <h3>Exporting</h3>
+          <p>
+            <code>/export</code> writes an <a href="#runner-overview">@appclaw/runner</a> spec by
+            default, or a YAML flow if you give it a <code>.yaml</code> name. Bare filenames land in
+            <code>EXPORT_DIR</code> (default <code>tests</code>), so the file is runnable where it
+            lands:
+          </p>
+          <div class="code-block">
+            <div class="code-block-header">
+              <div class="code-block-dots"><span></span><span></span><span></span></div>
+              <span class="code-block-label">Record, export, run</span>
+            </div>
+            <pre><span class="k">appclaw</span> <span class="fl">--tui</span>
+<span class="c"># …record steps at the prompt, then:</span>
+/export login.spec.ts
+
+<span class="c"># then run it like any other spec</span>
+<span class="k">appclaw</span> test login</pre>
           </div>
         </section>
 
@@ -2931,7 +3405,8 @@
                 <td>EXPORT_DIR</td>
                 <td>
                   Default directory for bare-filename exports / <code>--export</code> writes
-                  (default: <code>.appclaw/exports</code>). Overridden by <code>--export-dir</code>.
+                  (default: <code>tests</code>, the runner's own testDir). Overridden by
+                  <code>--export-dir</code>.
                 </td>
               </tr>
               <tr>
@@ -3006,7 +3481,7 @@
           <ul>
             <li>
               <strong>CLI:</strong> <code>--caps path/to/caps.json</code> (interactive, YAML flow,
-              <code>--playground</code>, <code>--record</code> — every mode).
+              <code>--tui</code>, <code>--record</code> — every mode).
             </li>
             <li>
               <strong>Env var:</strong> <code>CAPABILITIES_FILE=path/to/caps.json</code> in
@@ -3637,7 +4112,7 @@ console<span class="p">.</span>log<span class="p">(</span>result<span class="p">
           <h2>run()</h2>
           <p>
             Execute a single natural-language instruction directly on the device — the programmatic
-            equivalent of typing a command in the playground REPL. Each call is one atomic action:
+            equivalent of typing an instruction in Terminal Studio. Each call is one atomic action:
             parse the instruction, execute it, return the result.
           </p>
 

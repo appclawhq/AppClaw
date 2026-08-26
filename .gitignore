@@ -3,6 +3,9 @@ dist/
 .env
 *.log
 .DS_Store
+# JetBrains workspace state — per-developer, never shared
+.idea/
+*.iml
 .claude/
 recordings/
 logs/

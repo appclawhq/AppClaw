@@ -106,7 +106,7 @@ export class AppClaw {
 
     // `silent` controls per-step log lines (✓ #1 tap "label" ...). Default is
     // FALSE — most SDK consumers want to see what's happening on the device,
-    // matching the playground's UX. Pass `silent: true` for a quiet test run.
+    // matching the TUI's UX. Pass `silent: true` for a quiet test run.
     // The legacy --json-mode terminal suppression still runs when JSON mode is
     // enabled regardless, so JSON consumers stay clean.
     this.silent = options.silent === true;
@@ -181,7 +181,7 @@ export class AppClaw {
   /**
    * Execute a single natural-language instruction on the device.
    *
-   * Equivalent to the playground's per-command execution: the instruction is
+   * Equivalent to the TUI's per-command execution: the instruction is
    * interpreted (regex → LLM fallback) and executed immediately as one step.
    * Each call is captured as a step in the auto-generated report.
    *

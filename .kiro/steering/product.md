@@ -6,7 +6,7 @@ AppClaw is an agentic AI layer for mobile automation on Android and iOS. Users d
 
 - **Agent mode** — LLM-driven goal execution (e.g. `appclaw "Send a WhatsApp message to Mom"`)
 - **YAML flows** — declarative, zero-LLM automation steps defined in YAML files
-- **Playground** — interactive REPL for building flows live on a device
+- **Terminal Studio** (`--tui`, alias `--playground`) — the interactive mode: step recorder, device picker, command palette, run history, and in-terminal device stream
 - **Explorer** — generates YAML test flows from a PRD or app description
 - **Record/Replay** — capture and adaptively replay goal executions
 - **Report** — Express server serving HTML run reports
