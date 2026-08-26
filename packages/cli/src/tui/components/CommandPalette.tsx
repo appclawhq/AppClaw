@@ -26,9 +26,9 @@ export interface CommandPaletteProps {
 }
 
 /**
- * Left-column panel from the wireframe: a bordered "Command pallet" list
+ * Left-column panel from the wireframe: a bordered "Command palette" list
  * (filtered live as the user types a leading "/") sitting above the
- * "Type instruction" input, where plain text is treated as a goal.
+ * instruction input; plain text runs one deterministic step and records it.
  */
 /**
  * The cap on the visible command list (MAX_VISIBLE_COMMANDS) lives in

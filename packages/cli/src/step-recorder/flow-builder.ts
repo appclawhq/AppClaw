@@ -94,7 +94,7 @@ export function buildYamlString(steps: FlowStep[], meta: FlowMeta): string {
 
 /**
  * Whether the given filename should be exported as an @appclaw/runner spec
- * format) rather than the default YAML flow format.
+ * format rather than the default YAML flow format.
  */
 export function isSdkTestFilename(name: string): boolean {
   return /\.(?:test|spec)\.(?:m|c)?[jt]sx?$/i.test(name) || /\.(?:m|c)?ts$/i.test(name);
