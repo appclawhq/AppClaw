@@ -258,32 +258,118 @@ const envSchema = z.object({
 
 export type AppClawConfig = z.infer<typeof envSchema>;
 
-export function loadConfig(overrides?: Record<string, string | undefined>): AppClawConfig {
-  const env = overrides ? { ...process.env, ...overrides } : process.env;
-  const config = envSchema.parse(env);
-  if (config.CLOUD_PROVIDER) {
-    // `custom` can carry auth in CLOUD_SERVER_URL, so creds aren't strictly
-    // required there — but it MUST provide the hub URL. Known providers need creds.
-    if (config.CLOUD_PROVIDER === 'custom') {
-      if (!config.CLOUD_SERVER_URL) {
-        throw new Error('CLOUD_SERVER_URL is required when CLOUD_PROVIDER=custom');
-      }
-    } else if (!config.CLOUD_USERNAME || !config.CLOUD_ACCESS_KEY) {
-      throw new Error(
-        `CLOUD_USERNAME and CLOUD_ACCESS_KEY are required when CLOUD_PROVIDER=${config.CLOUD_PROVIDER}`
-      );
+/** One thing wrong with the environment, in a shape a UI can act on. */
+export interface ConfigIssue {
+  /** The offending variable, so a settings screen can jump straight to it. */
+  key: string;
+  message: string;
+  /** For a rejected enum, the values it will accept. */
+  options?: string[];
+}
+
+export interface ConfigLoadResult {
+  config: AppClawConfig;
+  issues: ConfigIssue[];
+}
+
+/** Cross-field rules zod cannot express, as issues rather than throws. */
+function cloudIssues(config: AppClawConfig): ConfigIssue[] {
+  if (!config.CLOUD_PROVIDER) return [];
+  // `custom` can carry auth in CLOUD_SERVER_URL, so creds aren't strictly
+  // required there — but it MUST provide the hub URL. Known providers need creds.
+  if (config.CLOUD_PROVIDER === 'custom') {
+    if (!config.CLOUD_SERVER_URL) {
+      return [{ key: 'CLOUD_SERVER_URL', message: 'Required when CLOUD_PROVIDER=custom' }];
     }
-    // Note: device / OS / app can come from CLOUD_DEVICE_NAME / CLOUD_OS_VERSION
-    // / CLOUD_APP, or from inline `capabilities` (top-level appium:* or a
-    // provider namespace like lt:options). We don't hard-fail here — the grid
-    // itself returns a clear W3C error if the merged caps are missing platform
-    // or device selectors, and requiring env vars would defeat the point of
-    // "everything inline in appclaw.config.ts".
+    return [];
+  }
+  if (!config.CLOUD_USERNAME || !config.CLOUD_ACCESS_KEY) {
+    return [
+      {
+        key: config.CLOUD_USERNAME ? 'CLOUD_ACCESS_KEY' : 'CLOUD_USERNAME',
+        message: `CLOUD_USERNAME and CLOUD_ACCESS_KEY are required when CLOUD_PROVIDER=${config.CLOUD_PROVIDER}`,
+      },
+    ];
+  }
+  // Note: device / OS / app can come from CLOUD_DEVICE_NAME / CLOUD_OS_VERSION
+  // / CLOUD_APP, or from inline `capabilities` (top-level appium:* or a
+  // provider namespace like lt:options). We don't hard-fail here — the grid
+  // itself returns a clear W3C error if the merged caps are missing platform
+  // or device selectors, and requiring env vars would defeat the point of
+  // "everything inline in appclaw.config.ts".
+  return [];
+}
+
+function toConfigIssue(issue: z.ZodIssue): ConfigIssue {
+  return {
+    key: String(issue.path[0] ?? ''),
+    message: issue.message,
+    options: issue.code === 'invalid_enum_value' ? issue.options.map((o) => String(o)) : undefined,
+  };
+}
+
+/**
+ * Load the config without throwing, reporting what is wrong instead.
+ *
+ * This exists because `Config` is built at import time: a `throw` there escapes
+ * every try/catch in the CLI (there is no `main()` yet) and Node prints a raw
+ * ZodError with a stack trace — for something as ordinary as a typo in `.env`.
+ * Returning the problems lets the caller decide, and lets Terminal Studio show
+ * them on a screen that can also fix them.
+ *
+ * The config that comes back is still usable: each rejected key is dropped so
+ * its schema default applies, and every other variable survives. That is only
+ * so the process can live long enough to report the problem — callers must not
+ * run on it while `issues` is non-empty.
+ */
+export function safeLoadConfig(overrides?: Record<string, string | undefined>): ConfigLoadResult {
+  const env = overrides ? { ...process.env, ...overrides } : process.env;
+  const parsed = envSchema.safeParse(env);
+  if (parsed.success) {
+    return { config: parsed.data, issues: cloudIssues(parsed.data) };
+  }
+
+  const issues = parsed.error.issues.map(toConfigIssue);
+  const sanitized: Record<string, string | undefined> = { ...env };
+  for (const issue of issues) delete sanitized[issue.key];
+  const retry = envSchema.safeParse(sanitized);
+  // A second failure would mean a key with no default, which the schema does
+  // not have — but falling back to a bare parse keeps this total rather than
+  // trading one unhandled throw for another.
+  const config = retry.success ? retry.data : envSchema.parse({});
+  return { config, issues: [...issues, ...cloudIssues(config)] };
+}
+
+/** `key: message` per problem — the plain-text form for a console error. */
+export function formatConfigIssues(issues: ConfigIssue[]): string {
+  return issues.map((i) => `${i.key}: ${i.message}`).join('\n');
+}
+
+/**
+ * Load the config, throwing on anything invalid.
+ *
+ * Kept for the SDK and any caller that wants the strict behaviour; the CLI uses
+ * `safeLoadConfig` so it can report a typo instead of dying on it.
+ */
+export function loadConfig(overrides?: Record<string, string | undefined>): AppClawConfig {
+  const { config, issues } = safeLoadConfig(overrides);
+  if (issues.length > 0) {
+    throw new Error(`Invalid AppClaw configuration:\n${formatConfigIssues(issues)}`);
   }
   return config;
 }
 
-export const Config = loadConfig();
+const initial = safeLoadConfig();
+
+export const Config = initial.config;
+
+/** Problems found the last time the config was read. Empty means it is usable. */
+let lastIssues: ConfigIssue[] = initial.issues;
+
+/** What is wrong with the current environment, if anything. */
+export function configIssues(): ConfigIssue[] {
+  return lastIssues;
+}
 
 /**
  * Mutate the shared `Config` singleton in place so every module that imported it
@@ -308,4 +394,16 @@ export function applyConfig(cfg: AppClawConfig): AppClawConfig {
  */
 export function refreshConfig(): AppClawConfig {
   return applyConfig(loadConfig());
+}
+
+/**
+ * `refreshConfig` for callers that would rather report a bad `.env` than throw
+ * on it. The singleton is still updated, so a caller that decides to continue
+ * anyway is running on the same values everything else sees.
+ */
+export function safeRefreshConfig(): ConfigLoadResult {
+  const result = safeLoadConfig();
+  applyConfig(result.config);
+  lastIssues = result.issues;
+  return result;
 }
