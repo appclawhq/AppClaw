@@ -20,6 +20,7 @@ const STATUS_LABEL: Record<StreamState['status'], string> = {
   idle: 'Not started',
   starting: 'Starting…',
   running: 'Live',
+  paused: 'Paused',
   error: 'Error',
 };
 
@@ -27,6 +28,7 @@ const STATUS_COLOR: Record<StreamState['status'], string> = {
   idle: COLORS.dimmed,
   starting: COLORS.cyan,
   running: COLORS.green,
+  paused: COLORS.yellow,
   error: COLORS.red,
 };
 
@@ -102,7 +104,7 @@ function imageBody(
         ? `${symbols.cross} ${stream.error}`
         : stream.status === 'starting'
           ? 'Waiting for the first frame…'
-          : '/stream mirrors the screen here';
+          : '^r mirrors the screen here';
     const above = Math.max(0, Math.floor((imageRows - 1) / 2));
     for (let i = 0; i < above; i++) rows.push(blank(`pad-${i}`));
     rows.push(
@@ -144,10 +146,14 @@ export function StreamPanel({ device, stream, width, imageRows }: StreamPanelPro
   const fitted = stream.resolution
     ? streamCells(termCols, termRows, stream.resolution.width, stream.resolution.height)
     : null;
+  // Paused counts as showing a picture: the image is still loaded in the
+  // terminal, so the placeholder cells must keep being drawn or the frame the
+  // pause exists to hold would disappear.
+  const showsPicture = stream.status === 'running' || stream.status === 'paused';
   // Beyond the diacritic table a row cannot be addressed at all; no terminal is
   // this tall, but a clamp beats throwing out of a render.
   const cells =
-    fitted && stream.status === 'running' && stream.backend === 'kitty'
+    fitted && showsPicture && stream.backend === 'kitty'
       ? { cols: fitted.cols, rows: Math.min(fitted.rows, MAX_PLACEHOLDER_INDEX + 1) }
       : null;
 

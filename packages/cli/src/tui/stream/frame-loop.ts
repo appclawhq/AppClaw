@@ -81,8 +81,28 @@ let loop: LoopState | null = null;
  */
 let visible = true;
 
+/**
+ * Whether `/stream-pause` has asked the loop to stop capturing.
+ *
+ * A separate gate from `visible`, not the same one: that tracks whether anything
+ * is rendering the picture, this tracks whether the user wants it updated. Both
+ * must be clear for a tick to capture, and neither may clear the other — a pause
+ * has to survive the panel unmounting and remounting (a dialog, a screen
+ * change), and a remount must not silently resume a paused stream.
+ *
+ * Pausing deliberately leaves the loop, its temp dir and any transmitted kitty
+ * image alone. That is the whole difference from `/stream-close`: the last frame
+ * stays on screen, and resuming costs nothing — no backend re-detection, no
+ * resolution round-trip, no re-transmit.
+ */
+let paused = false;
+
 export function isStreamLoopRunning(): boolean {
   return loop !== null;
+}
+
+export function isStreamLoopPaused(): boolean {
+  return paused;
 }
 
 /** Driven by <StreamPanel>'s mount/unmount — the panel is what renders the picture. */
@@ -90,8 +110,22 @@ export function setStreamPanelVisible(next: boolean): void {
   visible = next;
 }
 
+/** `/stream-pause` — hold the last frame and stop capturing. */
+export function pauseStreamLoop(): void {
+  paused = true;
+}
+
+/** `/stream` on a paused mirror — start capturing again into the same picture. */
+export function resumeStreamLoop(): void {
+  paused = false;
+}
+
 export function startStreamLoop(options: StreamLoopOptions): void {
   stopStreamLoop();
+  // A fresh stream is never born paused — stopStreamLoop leaves the flag alone
+  // so a pause survives a panel remount, which means a later start has to clear
+  // it explicitly.
+  paused = false;
   const state: LoopState = {
     ...options,
     // Placeholder: replaced immediately below. setInterval needs `state` to
@@ -131,7 +165,7 @@ export function stopStreamLoop(): void {
 }
 
 async function tick(state: LoopState): Promise<void> {
-  if (loop !== state || state.busy || !visible) return;
+  if (loop !== state || state.busy || !visible || paused) return;
   state.busy = true;
   try {
     // Read the terminal size every tick so a resize re-fits the image without

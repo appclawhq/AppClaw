@@ -1,10 +1,16 @@
 /**
- * Geometry for MainScreen's two-column row.
+ * Geometry for the two-column row, shared by MainScreen and GoalRunScreen.
  *
  * Every constant below mirrors a prop somewhere in TuiApp / MainScreen /
- * CommandPalette / StreamPanel, and they live together because several of them
- * have to add up: the two columns must fill the frame exactly, and the panel's
- * rows must be the ones the transcript budgeted around.
+ * GoalRunScreen / CommandPalette / StreamPanel, and they live together because
+ * several of them have to add up: the two columns must fill the frame exactly,
+ * and the panel's rows must be the ones the transcript budgeted around.
+ *
+ * Both screens use the SAME split and the same chrome height, and that is a
+ * requirement rather than a preference: the frame loop sizes each transmitted
+ * image with `streamCells` and cannot know which screen is mounted, so a screen
+ * that laid the panel out differently would hand the terminal an image that no
+ * longer matches the placeholder grid drawn for it.
  *
  * Note what is NOT here any more: absolute terminal coordinates. The device
  * picture is placed by the Unicode placeholder cells <StreamPanel> renders, so
@@ -44,6 +50,17 @@ export const MAX_VISIBLE_COMMANDS = 10;
  * doubles as the single-row gap before the input. Input box: border(2) + 1 line.
  */
 const PALETTE_FIXED_ROWS = 2 + 1 + 1 + 1 + 1 + 1 + (2 + 1);
+
+/**
+ * Rows the palette spends with its list hidden: the feedback row and the input
+ * box, nothing else.
+ *
+ * Goal mode has no use for a standing list of commands — a plain line is a
+ * goal, so the list is answering a question nobody asked while occupying half
+ * the column. It reappears the moment the line starts with `/`, which is the
+ * only time it is a filter rather than wallpaper.
+ */
+const PALETTE_COLLAPSED_ROWS = 1 + (2 + 1);
 
 /**
  * <StatusBar>: its `marginTop` + border(2) + the hint line + the message line.
@@ -103,9 +120,15 @@ export function visibleCommandCount(termRows: number): number {
   return Math.max(1, Math.min(MAX_VISIBLE_COMMANDS, spare));
 }
 
-/** The palette's height at the top of the left column. */
-export function paletteRows(termRows: number): number {
-  return PALETTE_FIXED_ROWS + visibleCommandCount(termRows);
+/**
+ * The palette's height at the top of the left column.
+ *
+ * `listVisible` is the mode's doing, not the terminal's: with the list hidden
+ * the palette is just a prompt, and the rows it gives up go to the transcript
+ * rather than to the frame, so the two columns still add up.
+ */
+export function paletteRows(termRows: number, listVisible = true): number {
+  return listVisible ? PALETTE_FIXED_ROWS + visibleCommandCount(termRows) : PALETTE_COLLAPSED_ROWS;
 }
 
 /**
@@ -117,15 +140,60 @@ export const MIN_MAIN_ROWS =
   CHROME_ROWS + PALETTE_FIXED_ROWS + 1 + TRANSCRIPT_CHROME_ROWS + MIN_TRANSCRIPT_ROWS;
 
 /**
+ * Rows the goal-run pane gets: the whole left column, since it has no palette
+ * under it. Same `contentRows` the stream panel is sized from, which is what
+ * lets the run screen and the main screen show the picture at identical size —
+ * the frame loop asks `streamCells` for a cell box without knowing, or being
+ * able to know, which screen is currently mounted.
+ */
+export function runPaneRows(termRows: number): number {
+  return contentRows(termRows);
+}
+
+/**
+ * Shortest terminal the run screen fits in. Lower than MIN_MAIN_ROWS: there is
+ * no command palette here, only the chrome plus a pane tall enough for a plan
+ * checklist above the pinned footer.
+ */
+export const MIN_RUN_ROWS = CHROME_ROWS + 8;
+
+/**
  * Scrolling rows in the transcript — whatever the palette above it leaves.
  * Unlike before, this does not shrink when a stream starts: the transcript is
  * beside the picture now, not above it, so the two no longer compete for rows.
  */
-export function transcriptRows(termRows: number): number {
+export function transcriptRows(termRows: number, listVisible = true): number {
   return Math.max(
     MIN_TRANSCRIPT_ROWS,
-    contentRows(termRows) - paletteRows(termRows) - TRANSCRIPT_CHROME_ROWS
+    contentRows(termRows) - paletteRows(termRows, listVisible) - TRANSCRIPT_CHROME_ROWS
   );
+}
+
+/**
+ * Lines the prompt may grow to before its text is clipped instead.
+ *
+ * A long line has to wrap — `ink-text-input` has no truncate option, so
+ * clipping it means typing blind past the first line, and goal mode is where
+ * the longest lines get typed. The rows have to come from somewhere: from the
+ * command list while it is showing, and from the transcript while it is not,
+ * down to the point where the transcript stops being worth reading.
+ */
+export function inputLineBudget(termRows: number, listVisible = true): number {
+  return listVisible
+    ? visibleCommandCount(termRows)
+    : Math.max(1, transcriptRows(termRows, false) - MIN_TRANSCRIPT_ROWS + 1);
+}
+
+/**
+ * Lines `query` occupies in a `width`-wide column, capped at `max`.
+ *
+ * Shared so the palette and the screen that budgets around it cannot disagree:
+ * the screen shrinks the transcript by exactly the rows the prompt takes.
+ */
+export function inputLineCount(query: string, width: number, max: number): number {
+  const inner = Math.max(1, width - 2 /* border */ - 2 /* paddingX */ - 2 /* "\u276f " */);
+  const wanted = Math.max(1, Math.ceil(Math.max(query.length, 1) / inner));
+  return Math.min(wanted, Math.max(1, max));
 }
 
 /** Rows inside StreamPanel's border that belong to the picture — the full column. */

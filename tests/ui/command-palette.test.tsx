@@ -28,12 +28,42 @@ function palette(overrides: Partial<React.ComponentProps<typeof CommandPalette>>
       disabled={false}
       error={null}
       focused
+      placeholder="Type a step or /command"
+      listVisible
+      maxInputLines={10}
       {...overrides}
     />
   );
 }
 
 describe('CommandPalette', () => {
+  test('goal mode gets a prompt, not a standing list of commands', () => {
+    // A plain line is a goal there, so the list is not a menu of what to type
+    // next — it is half a column of text answering nothing.
+    const rows = rowsOf(palette({ listVisible: false, maxInputLines: 4 }));
+    expect(rows.join('\n')).not.toContain('Command palette');
+    expect(rows.join('\n')).not.toContain('/goal');
+    expect(rows.join('\n')).toContain('Type a step');
+    // PALETTE_COLLAPSED_ROWS — feedback row + input box — plus the component's
+    // own marginTop, which the column above it owns in the real layout.
+    expect(rows.length).toBe(1 + 4);
+  });
+
+  test('the collapsed prompt still wraps a long line rather than typing blind', () => {
+    const width = columnWidths(120).left;
+    const long = 'open settings and read the currently connected wifi network name aloud';
+    const one = rowsOf(palette({ width, listVisible: false, maxInputLines: 4 })).length;
+    const many = rowsOf(
+      palette({ width, listVisible: false, maxInputLines: 4, query: long })
+    ).length;
+    expect(many).toBeGreaterThan(one);
+    // ...but never past what the screen budgeted for it.
+    const absurd = rowsOf(
+      palette({ width, listVisible: false, maxInputLines: 4, query: 'x'.repeat(4000) })
+    ).length;
+    expect(absurd).toBe(one + 3);
+  });
+
   test('the row count does not change when a message appears', () => {
     const quiet = rowsOf(palette());
     const noisy = rowsOf(palette({ error: 'Unknown command: /qutd — try /help' }));

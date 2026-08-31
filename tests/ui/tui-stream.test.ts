@@ -10,6 +10,14 @@ import { parseRawScreencap } from '@appclaw/cli/tui/stream/capture';
 import { renderHalfBlocks } from '@appclaw/cli/tui/stream/halfblock';
 import { kittyTransmitVirtual, kittyDeleteImage } from '@appclaw/cli/tui/stream/kitty';
 import {
+  isStreamLoopPaused,
+  pauseStreamLoop,
+  resumeStreamLoop,
+  setStreamPanelVisible,
+  startStreamLoop,
+  stopStreamLoop,
+} from '@appclaw/cli/tui/stream/frame-loop';
+import {
   APP_PADDING_COLS,
   COLUMN_GAP_COLS,
   FRAME_BORDER,
@@ -271,6 +279,23 @@ describe('layout', () => {
     }
   });
 
+  test('the left column still fills the content height with the list hidden', () => {
+    // Goal mode collapses the palette to a prompt. The rows it gives up have to
+    // go to the transcript, not to the frame — Ink overlaps an under-filled
+    // column's neighbours rather than leaving a gap.
+    for (const termRows of [30, 40, 60, 80]) {
+      const used =
+        paletteRows(termRows, false) + TRANSCRIPT_CHROME_ROWS + transcriptRows(termRows, false);
+      expect(used).toBe(contentRows(termRows));
+      expect(transcriptRows(termRows, false)).toBeGreaterThan(transcriptRows(termRows, true));
+      // The picture is unaffected: the frame loop sizes each image without
+      // knowing which mode is active, so the panel must not move.
+      expect(panelImageRows(termRows)).toBe(
+        contentRows(termRows) - 2 * PANEL_BORDER - PANEL_STATUS_ROWS
+      );
+    }
+  });
+
   test('the palette column never gets so narrow the command list is unreadable', () => {
     for (const termCols of [80, 120, 200, 400]) {
       const { left, right } = columnWidths(termCols);
@@ -278,6 +303,49 @@ describe('layout', () => {
       // The picture takes the larger share on any reasonably wide terminal.
       if (termCols >= 120) expect(right).toBeGreaterThan(left);
     }
+  });
+});
+
+describe('pause', () => {
+  // Pausing must not look like closing. `/stream-close` tears the loop down —
+  // and with it the temp dir and, for kitty, the transmitted image, which is
+  // what makes the picture vanish. A pause leaves all of that alone and only
+  // stops ticks from capturing, so the last frame stays on screen and resuming
+  // costs no adb round-trip and no re-transmit.
+  test('pause and resume gate capture without touching the loop', () => {
+    expect(isStreamLoopPaused()).toBe(false);
+    pauseStreamLoop();
+    expect(isStreamLoopPaused()).toBe(true);
+    resumeStreamLoop();
+    expect(isStreamLoopPaused()).toBe(false);
+  });
+
+  test('a pause survives the panel unmounting and remounting', () => {
+    // The two gates are independent on purpose: `visible` tracks whether
+    // anything renders the picture, `paused` tracks whether the user wants it
+    // updated. A dialog opening and closing must not resume a paused stream.
+    pauseStreamLoop();
+    setStreamPanelVisible(false);
+    setStreamPanelVisible(true);
+    expect(isStreamLoopPaused()).toBe(true);
+    resumeStreamLoop();
+  });
+
+  test('starting a fresh stream clears a stale pause', () => {
+    // stopStreamLoop deliberately leaves the flag alone (so a pause outlives a
+    // remount), which means a later start has to clear it or the new stream
+    // would come up frozen.
+    pauseStreamLoop();
+    startStreamLoop({
+      udid: 'nonexistent-device',
+      deviceWidth: 1080,
+      deviceHeight: 2400,
+      backend: 'halfblock',
+      onFrame: () => {},
+      onError: () => {},
+    });
+    expect(isStreamLoopPaused()).toBe(false);
+    stopStreamLoop();
   });
 });
 

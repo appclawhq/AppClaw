@@ -18,6 +18,12 @@ function fmtDuration(ms?: number): string {
  *
  *   [3/12]  ✓  tap    "search icon"                    ●  0.8s
  *              ↳  Tapped "search icon" at [432, 421]
+ *
+ * The row is a fixed-width grid summing to ~79 cells. Rendered into anything
+ * narrower — Terminal Studio puts the run in a column beside the device stream —
+ * Yoga shrinks the boxes, and without `wrap="truncate"` the text inside them
+ * reflows onto a second line, which both scrambles the row ("[1/3" over "0]")
+ * and costs the caller a row its height budget never reserved.
  */
 export function StepLine({ data }: { data: StepData }) {
   const { step, maxSteps, verb, actionType, target, status, detail, durationMs, tokens } = data;
@@ -30,14 +36,14 @@ export function StepLine({ data }: { data: StepData }) {
 
   return (
     <Box flexDirection="column">
-      <Box marginLeft={2}>
+      <Box marginLeft={2} overflow="hidden">
         {/* step counter */}
-        <Box width={8}>
-          <Text color={COLORS.dimmed}>{`[${step}/${maxSteps}]`}</Text>
+        <Box width={8} flexShrink={0}>
+          <Text color={COLORS.dimmed} wrap="truncate">{`[${step}/${maxSteps}]`}</Text>
         </Box>
 
         {/* status icon */}
-        <Box width={3}>
+        <Box width={3} flexShrink={0}>
           {isRunning ? (
             <OrbitalSpinner />
           ) : isFailed ? (
@@ -52,30 +58,34 @@ export function StepLine({ data }: { data: StepData }) {
         </Box>
 
         {/* verb */}
-        <Box width={VERB_WIDTH}>
-          <Text color={isFailed ? COLORS.red : COLORS.step}>{verb}</Text>
+        <Box width={VERB_WIDTH} flexShrink={0}>
+          <Text color={isFailed ? COLORS.red : COLORS.step} wrap="truncate">
+            {verb}
+          </Text>
         </Box>
 
         {/* target */}
-        <Box width={TARGET_WIDTH + 1}>
+        <Box width={TARGET_WIDTH + 1} flexShrink={0}>
           {isRunning ? (
             <ShimmerText text={displayTarget} active />
           ) : isFailed ? (
-            <Text color={COLORS.red}>{displayTarget}</Text>
+            <Text color={COLORS.red} wrap="truncate">
+              {displayTarget}
+            </Text>
           ) : (
-            <Text>{displayTarget}</Text>
+            <Text wrap="truncate">{displayTarget}</Text>
           )}
         </Box>
 
         {/* action icon */}
-        <Box width={3}>
+        <Box width={3} flexShrink={0}>
           {isDone || isFailed ? (
             <Text color={COLORS.muted}>{getActionIcon(actionType)}</Text>
           ) : null}
         </Box>
 
         {/* duration */}
-        <Box width={7} justifyContent="flex-end">
+        <Box width={7} justifyContent="flex-end" flexShrink={0}>
           <Text color={COLORS.dimmed}>{fmtDuration(durationMs)}</Text>
         </Box>
       </Box>
@@ -83,7 +93,7 @@ export function StepLine({ data }: { data: StepData }) {
       {/* result detail */}
       {detail ? (
         <Box marginLeft={13}>
-          <Text color={isFailed ? COLORS.red : COLORS.dimmed}>
+          <Text color={isFailed ? COLORS.red : COLORS.dimmed} wrap="truncate">
             {symbols.arrowDown} {detail}
           </Text>
         </Box>
@@ -92,7 +102,7 @@ export function StepLine({ data }: { data: StepData }) {
       {/* per-step tokens */}
       {tokens ? (
         <Box marginLeft={13}>
-          <Text color={COLORS.muted}>
+          <Text color={COLORS.muted} wrap="truncate">
             ⟠ {tokens.input + tokens.output} tokens (in {tokens.input} · out {tokens.output}
             {tokens.cached ? ` · cached ${tokens.cached}` : ''})
             {tokens.cost != null && tokens.cost > 0 ? `  $${tokens.cost.toFixed(5)}` : ''}

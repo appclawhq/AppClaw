@@ -8,8 +8,11 @@ import { Header } from '../components/Header.js';
 import { CommandPalette } from '../components/CommandPalette.js';
 import { StreamPanel } from '../components/StreamPanel.js';
 import { StatusBar } from '../components/StatusBar.js';
+import { handleStreamKey, streamHints } from '../stream-keys.js';
 import {
   columnWidths,
+  inputLineBudget,
+  inputLineCount,
   panelImageRows,
   transcriptRows,
   visibleCommandCount,
@@ -69,12 +72,14 @@ function Transcript({
   scrolledBy,
   total,
   focused,
+  emptyHint,
 }: {
   rows: TranscriptRow[];
   budget: number;
   scrolledBy: number;
   total: number;
   focused: boolean;
+  emptyHint: string;
 }) {
   const scrollable = total > budget;
   return (
@@ -101,7 +106,7 @@ function Transcript({
         </Text>
       </Box>
       {rows.length === 0 ? (
-        <Text color={COLORS.dimmed}>Nothing yet — try /help or type a goal.</Text>
+        <Text color={COLORS.dimmed}>{emptyHint}</Text>
       ) : (
         rows.map((row) => (
           // marginLeft on a Box rather than a leading space in the text — a
@@ -133,7 +138,6 @@ export function MainScreen({ actions }: MainScreenProps) {
   const widths = columnWidths(cols);
   const imageRows = panelImageRows(rows);
   const maxCommands = visibleCommandCount(rows);
-  const transcriptBudget = transcriptRows(rows);
 
   /** Which pane the keyboard belongs to. Shift+Tab moves between them. */
   const [focus, setFocus] = useState<'input' | 'transcript'>('input');
@@ -155,6 +159,25 @@ export function MainScreen({ actions }: MainScreenProps) {
     setHistoryIndex(next);
     setValue(next === 0 ? draftRef.current : history[history.length - next]);
   }
+
+  /**
+   * Goal mode does not stand a command list above the prompt.
+   *
+   * In record mode a plain line and a `/command` are the same kind of thing, so
+   * the list is a menu of what you might type next. In goal mode a plain line
+   * is a goal — the list is then a permanent answer to a question nobody asked,
+   * taking half the column from the transcript, which is the part you actually
+   * read. It comes back the moment the line starts with `/`, where it is a live
+   * filter rather than wallpaper, and the status bar keeps advertising the
+   * commands worth knowing.
+   */
+  const listVisible = ui.mode !== 'goal' || value.trimStart().startsWith('/');
+  // With the list hidden there is nothing above the prompt to give up rows for
+  // a wrapped line, so they come out of the transcript instead — computed here
+  // rather than inside the palette because this is where the transcript's
+  // height is set.
+  const inputLines = inputLineCount(value, widths.left, inputLineBudget(rows, listVisible));
+  const transcriptBudget = transcriptRows(rows, listVisible) - (listVisible ? 0 : inputLines - 1);
 
   const allRows = useMemo(() => toRows(ui.transcript), [ui.transcript]);
   /** Rows scrolled back from the newest line; 0 follows the tail live. */
@@ -186,6 +209,11 @@ export function MainScreen({ actions }: MainScreenProps) {
    */
   useInput((input, key) => {
     const page = Math.max(1, transcriptBudget - 1);
+
+    // Mirror chords first, and from either pane. They are ctrl chords because
+    // the prompt below is a focused text input — a bare `p` is part of the goal
+    // being typed — and <PromptInput> leaves ctrl alone so they arrive here.
+    if (handleStreamKey(input, key, ui.stream.status, actions)) return;
 
     // Shift+Tab moves between the panes, in both directions — the conventional
     // "focus previous" key, and free because <TextInput> early-returns on it.
@@ -272,12 +300,16 @@ export function MainScreen({ actions }: MainScreenProps) {
     }
   }
 
-  // The recorded-step count is the core feedback loop of a recording session,
-  // so it rides along with the device context rather than hiding in /list.
-  const recorded = `${ui.steps.length} step${ui.steps.length === 1 ? '' : 's'} recorded`;
+  // What the subtitle's last field says is the mode's own feedback loop: the
+  // recorded-step count while recording (the reason /list exists), and what a
+  // plain line will do while in goal mode, where there is no step list at all.
+  const trailing =
+    ui.mode === 'goal'
+      ? 'goal mode — a plain line runs the agent'
+      : `${ui.steps.length} step${ui.steps.length === 1 ? '' : 's'} recorded`;
   const subtitle = ui.platform
-    ? `${ui.platform}${ui.device ? ` · ${ui.device.name}` : ' · no device selected'} · ${recorded}`
-    : recorded;
+    ? `${ui.platform}${ui.device ? ` · ${ui.device.name}` : ' · no device selected'} · ${trailing}`
+    : trailing;
 
   // Below this the frame cannot fit, and Ink does not clip an over-tall frame
   // — it overlaps rows, printing two lines of text onto one. Saying so beats
@@ -321,6 +353,11 @@ export function MainScreen({ actions }: MainScreenProps) {
               scrolledBy={scroll}
               total={allRows.length}
               focused={focus === 'transcript'}
+              emptyHint={
+                ui.mode === 'goal'
+                  ? 'Nothing yet — describe a goal, or /help.'
+                  : 'Nothing yet — type an instruction to record it, or /help.'
+              }
             />
             <CommandPalette
               width={widths.left}
@@ -332,6 +369,11 @@ export function MainScreen({ actions }: MainScreenProps) {
               error={ui.paletteError}
               busyText={ui.busyMessage}
               focused={focus === 'input'}
+              placeholder={
+                ui.mode === 'goal' ? 'Describe a goal or /command' : 'Type a step or /command'
+              }
+              listVisible={listVisible}
+              maxInputLines={inputLineBudget(rows, listVisible)}
             />
           </Box>
           <StreamPanel
@@ -343,14 +385,18 @@ export function MainScreen({ actions }: MainScreenProps) {
         </Box>
       </Box>
       <StatusBar
-        breadcrumb="Main"
+        breadcrumb={ui.mode === 'goal' ? 'Goal' : 'Main'}
         hints={
           focus === 'transcript'
             ? ['↑↓ scroll', '⇧tab back to prompt', 'ctrl+c quit']
             : [
+                // One command hint, then keys. The palette lists the commands
+                // — always in record mode, and on `/` in goal mode — so
+                // spending the bar on more of them crowded out the chords,
+                // which have nowhere else to be advertised. The bar truncates
+                // rather than wrapping, so the order here is a priority list.
                 '/help',
-                '/export',
-                '/goal',
+                ...streamHints(ui.stream.status),
                 '↑↓ history',
                 'tab complete',
                 '⇧tab scroll',

@@ -1,8 +1,9 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import TextInput from 'ink-text-input';
+import { PromptInput } from './PromptInput.js';
 import { COLORS, symbols } from '../../ui/ink/theme.js';
 import { matchCommands } from '../commands.js';
+import { inputLineCount } from '../stream/layout.js';
 
 export interface CommandPaletteProps {
   /** Cell width of the column — computed by layout.ts so the stream panel beside it lands where the painter expects. */
@@ -23,6 +24,20 @@ export interface CommandPaletteProps {
    * transcript use the bare arrow keys without a modifier.
    */
   focused: boolean;
+  /** What a plain line will do here — the prompt is the only place that says so. */
+  placeholder: string;
+  /**
+   * Whether the standing command list is shown above the prompt. False in goal
+   * mode until the line starts with `/`: there a plain line is a goal, so the
+   * list is not a filter for anything the user is typing.
+   */
+  listVisible: boolean;
+  /**
+   * Lines the prompt may wrap to before its text is clipped. Comes from the
+   * screen rather than from `maxCommands`, because with the list hidden the
+   * rows have to be borrowed from the transcript instead.
+   */
+  maxInputLines: number;
 }
 
 /**
@@ -48,20 +63,21 @@ export function CommandPalette({
   error,
   busyText,
   focused,
+  placeholder,
+  listVisible,
+  maxInputLines,
 }: CommandPaletteProps) {
   /**
    * A long instruction wraps the input box, and `ink-text-input` has no
    * truncate option — clipping it would leave you typing blind past the first
-   * line. Instead the command list gives up a row for every extra line the
-   * input takes, so the column's total height stays what the layout budgeted
-   * and you can always see what you are typing.
+   * line. Something above gives up a row for every extra line the input takes
+   * — the command list while it is showing, the transcript while it is not —
+   * so the column's total height stays what the layout budgeted. Past
+   * `maxInputLines` the input is clipped instead, because a genuinely
+   * pathological line must not be allowed to grow the column and corrupt the
+   * frame.
    */
-  const inputInnerCols = Math.max(1, width - 2 /* border */ - 2 /* paddingX */ - 2 /* "❯ " */);
-  const wantedInputLines = Math.max(1, Math.ceil(Math.max(query.length, 1) / inputInnerCols));
-  // The list can only give up so much: past this the input is clipped instead,
-  // because a genuinely pathological line must not be allowed to grow the
-  // column and corrupt the frame.
-  const inputLines = Math.min(wantedInputLines, Math.max(1, maxCommands));
+  const inputLines = inputLineCount(query, width, maxInputLines);
   const commandBudget = Math.max(1, maxCommands - (inputLines - 1));
 
   const matched = query.trim().startsWith('/') ? matchCommands(query) : matchCommands('/');
@@ -74,52 +90,54 @@ export function CommandPalette({
     // marginTop is the gap below the transcript above it; the row is part of
     // the transcript's height budget either way, it just renders here now.
     <Box flexDirection="column" width={width} marginTop={1}>
-      <Box
-        flexDirection="column"
-        borderStyle="round"
-        borderColor={COLORS.brand}
-        paddingX={1}
-        flexGrow={1}
-      >
-        {/* Every row here truncates rather than wraps. The palette's height is
+      {listVisible ? (
+        <Box
+          flexDirection="column"
+          borderStyle="round"
+          borderColor={COLORS.brand}
+          paddingX={1}
+          flexGrow={1}
+        >
+          {/* Every row here truncates rather than wraps. The palette's height is
             budgeted as one row per command; a summary long enough to wrap
             silently costs two, and the extra rows push the whole left column
             past the frame — which Ink overlaps rather than clips. */}
-        <Text color={COLORS.brand} bold wrap="truncate">
-          Command palette
-        </Text>
-        <Text color={COLORS.dimmed} wrap="truncate">
-          All / commands — type to filter, Enter to run
-        </Text>
-        {/* Exactly `commandBudget` rows plus one overflow row, always — padded
+          <Text color={COLORS.brand} bold wrap="truncate">
+            Command palette
+          </Text>
+          <Text color={COLORS.dimmed} wrap="truncate">
+            All / commands — type to filter, Enter to run
+          </Text>
+          {/* Exactly `commandBudget` rows plus one overflow row, always — padded
             with blanks when there is less to show. A filter that matches
             nothing would otherwise render one line where ten stood, and the
             column's height is budgeted, not measured. */}
-        <Box flexDirection="column" marginTop={1} height={commandBudget + 1} overflow="hidden">
-          {commands.length === 0 ? (
-            <Text color={COLORS.dimmed} wrap="truncate">
-              No matching commands
-            </Text>
-          ) : (
-            commands.map((c) => (
-              <Text key={c.id} wrap="truncate">
-                <Text color={COLORS.step} bold>
-                  {c.name.padEnd(NAME_COLUMN_WIDTH)}
-                </Text>
-                <Text color={COLORS.dimmed}>{c.summary}</Text>
+          <Box flexDirection="column" marginTop={1} height={commandBudget + 1} overflow="hidden">
+            {commands.length === 0 ? (
+              <Text color={COLORS.dimmed} wrap="truncate">
+                No matching commands
               </Text>
-            ))
-          )}
-          {Array.from({
-            length: Math.max(0, commandBudget - Math.max(commands.length, 1)),
-          }).map((_, i) => (
-            <Text key={`pad-${i}`}> </Text>
-          ))}
-          <Text color={COLORS.dimmed} wrap="truncate">
-            {hidden > 0 ? `… +${hidden} more — type / to filter` : ' '}
-          </Text>
+            ) : (
+              commands.map((c) => (
+                <Text key={c.id} wrap="truncate">
+                  <Text color={COLORS.step} bold>
+                    {c.name.padEnd(NAME_COLUMN_WIDTH)}
+                  </Text>
+                  <Text color={COLORS.dimmed}>{c.summary}</Text>
+                </Text>
+              ))
+            )}
+            {Array.from({
+              length: Math.max(0, commandBudget - Math.max(commands.length, 1)),
+            }).map((_, i) => (
+              <Text key={`pad-${i}`}> </Text>
+            ))}
+            <Text color={COLORS.dimmed} wrap="truncate">
+              {hidden > 0 ? `… +${hidden} more — type / to filter` : ' '}
+            </Text>
+          </Box>
         </Box>
-      </Box>
+      ) : null}
 
       {/* Above the prompt rather than below it. The input is the last thing in
           the column, so a message under it landed hard against the frame's
@@ -156,17 +174,17 @@ export function CommandPalette({
             {busyText || 'working…'}
           </Text>
         ) : (
-          <TextInput
+          <PromptInput
             focus={focused}
             showCursor={focused}
             value={query}
             onChange={onQueryChange}
             onSubmit={onSubmit}
-            // Short enough to fit the narrowest column the layout allows.
-            // TextInput has no truncate option, so an over-long placeholder
-            // wraps to a second line and costs the column a row it hasn't
-            // budgeted.
-            placeholder="Type a step or /command"
+            // Keep every caller's text short enough for the narrowest column
+            // the layout allows: the input has no truncate option, so an
+            // over-long placeholder wraps to a second line and costs the column
+            // a row it hasn't budgeted.
+            placeholder={placeholder}
           />
         )}
       </Box>
