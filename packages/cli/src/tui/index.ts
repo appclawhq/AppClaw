@@ -71,6 +71,7 @@ import {
   resumeStreamLoop,
 } from './stream/frame-loop.js';
 import { detectStreamBackend, backendLabel } from './stream/terminal-caps.js';
+import { framedSize } from './stream/device-frame.js';
 import { fetchScreenInfo } from '../step-recorder/screen-info.js';
 import { captureConsoleAsync } from './capture-console.js';
 import { runDoctor } from '../cli/doctor.js';
@@ -256,6 +257,7 @@ export async function runTui(opts: RunTuiOptions): Promise<void> {
       error: undefined,
       backend: undefined,
       resolution: undefined,
+      displaySize: undefined,
       frameLines: undefined,
     });
   }
@@ -557,9 +559,10 @@ export async function runTui(opts: RunTuiOptions): Promise<void> {
     /**
      * In-terminal mirror, shown in the main screen's right-hand panel so the
      * command palette and instruction input stay usable while it runs. No
-     * browser and no second window — just adb screencap on a timer, fed to
-     * stream/frame-loop.ts, which works the same for an emulator, a physical
-     * device or a headless emulator.
+     * browser and no second window — just a screenshot on a timer, fed to
+     * stream/frame-loop.ts: `adb screencap` for Android (an emulator, a
+     * physical device and a headless emulator are all the same to it) and
+     * `xcrun simctl io … screenshot` for an iOS simulator.
      */
     async openStream() {
       const { device, stream } = getSnapshot();
@@ -576,15 +579,6 @@ export async function runTui(opts: RunTuiOptions): Promise<void> {
         tuiStore.log('info', 'Stream resumed');
         return;
       }
-      if (device.platform !== 'android') {
-        // Capture is `adb exec-out screencap`; iOS simulators have no
-        // equivalent that streams into a pipe.
-        const message =
-          'In-terminal streaming is Android-only (adb screencap). For an iOS simulator, use the Simulator app window.';
-        tuiStore.setStream({ status: 'error', error: message });
-        tuiStore.log('warn', 'Stream not available for iOS', message);
-        return;
-      }
 
       // Set before startStreamLoop: the panel has to be in its streaming
       // layout (and therefore the right height) before the first frame is
@@ -599,11 +593,18 @@ export async function runTui(opts: RunTuiOptions): Promise<void> {
         // Read once up front: the kitty path hands the PNG to the terminal
         // without decoding it, so this is the only source of the aspect ratio
         // the cell box is sized from.
-        const resolution = await getDeviceResolution(device.udid);
+        const resolution = await getDeviceResolution(device.platform, device.udid);
+        // The kitty backend draws a device body around the screen, which makes
+        // what is transmitted larger than the screen itself. The cell box is
+        // fitted to the transmitted size, so that — not the raw resolution — is
+        // what the loop and StreamPanel both have to agree on.
+        const framed = backend === 'kitty';
+        const displaySize = framed ? framedSize(resolution.width, resolution.height) : resolution;
         startStreamLoop({
+          platform: device.platform,
           udid: device.udid,
-          deviceWidth: resolution.width,
-          deviceHeight: resolution.height,
+          deviceWidth: displaySize.width,
+          deviceHeight: displaySize.height,
           backend,
           // Half-blocks are text, so they go through the store and Ink renders
           // them; the kitty backend never calls this (it writes pixels itself).
@@ -619,6 +620,7 @@ export async function runTui(opts: RunTuiOptions): Promise<void> {
           status: 'running',
           backend,
           resolution,
+          displaySize,
           error: undefined,
         });
         tuiStore.log(

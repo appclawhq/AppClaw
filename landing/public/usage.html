@@ -2084,10 +2084,11 @@
             rows for the prompt screen, 18 for a run &mdash; it says so rather than drawing a broken
             frame if the window is smaller). A missing <code>LLM_API_KEY</code> is not fatal here:
             the shell opens on a setup screen that names the problem and offers to write the key,
-            since it can already edit <code>.env</code>. The optional device mirroring is
-            Android-only: <code>^r</code> mirrors the screen <em>inside</em> the shell. Terminals
-            that support the kitty graphics protocol (Ghostty, kitty, WezTerm) show real pixels;
-            everywhere else falls back to coloured half-block characters. No install needed.
+            since it can already edit <code>.env</code>. The optional device mirroring covers
+            Android devices and emulators and iOS simulators: <code>^r</code> mirrors the screen
+            <em>inside</em> the shell, drawn in a device body. Terminals that support the kitty
+            graphics protocol (Ghostty, kitty, WezTerm) show real pixels; everywhere else falls back
+            to coloured half-block characters. No install needed.
           </p>
           <div class="code-block">
             <div class="code-block-header">
@@ -2446,13 +2447,19 @@ open settings and read the connected wifi name
             </thead>
             <tbody>
               <tr>
-                <td>Android device or emulator</td>
+                <td>An Android device/emulator, or an iOS simulator</td>
                 <td>Mirroring at all</td>
-                <td><code>/stream</code> refuses on iOS &mdash; use the Simulator window</td>
+                <td>
+                  A physical iPhone is not reachable &mdash; <code>simctl</code> cannot see one; use
+                  QuickTime Player
+                </td>
               </tr>
               <tr>
-                <td><code>adb</code> on PATH</td>
-                <td>Capturing frames (<code>adb exec-out screencap</code>)</td>
+                <td><code>adb</code> or <code>xcrun</code> on PATH</td>
+                <td>
+                  Capturing frames (<code>adb exec-out screencap</code> /
+                  <code>xcrun simctl io &hellip; screenshot</code>)
+                </td>
                 <td>Stream does not start</td>
               </tr>
               <tr>
@@ -2468,9 +2475,12 @@ open settings and read the connected wifi name
             </tbody>
           </table>
           <p>
-            <code>appclaw doctor</code> checks the first two rows &mdash; <code>adb</code> and a
-            connected Android device &mdash; and prints the exact commands for anything missing. The
-            last two only change fidelity, never whether the stream runs.
+            <code>appclaw doctor</code> checks the first two rows &mdash; the tooling and a
+            connected device &mdash; and prints the exact commands for anything missing. The last
+            two only change fidelity, never whether the stream runs. Frame rate is set by the
+            device, not by AppClaw: an iOS simulator captures in ~290ms, a fast Android device in
+            ~150ms, and a software-rendered emulator can take ~870ms, which is worth fixing with
+            <code>-gpu host</code> rather than in the terminal.
           </p>
 
           <h4>Which terminals give you real pixels</h4>

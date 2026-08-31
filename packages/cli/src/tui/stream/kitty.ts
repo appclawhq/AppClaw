@@ -3,9 +3,15 @@
  *
  * Wire format is `ESC _ G <control-data> ; <payload> ESC \`, where the payload
  * is always base64. Frames are sent by PATH (`t=f`, payload = the base64'd
- * filename) rather than by inlining the image bytes: a 180KB PNG is ~245KB of
- * base64 on every tick, and pushing that through stdout five times a second
+ * filename) rather than by inlining the image bytes: a 12MB frame is ~16MB of
+ * base64 on every tick, and pushing that through stdout several times a second
  * competes with Ink for the same pipe.
+ *
+ * The payload is a PNG (`f=100`) where the terminal can decode it for us, and
+ * raw RGBA (`f=32`) where we need an alpha channel it cannot supply — which is
+ * iOS, whose frames carry the rounded-corner mask. Raw costs a bigger file
+ * write and no encode; PNG costs neither, so Android keeps it. Either way the
+ * terminal does the scaling.
  *
  * Nothing here positions anything. Placement is the job of the U+10EEEE
  * placeholder cells Ink renders (see placeholder.ts) — this module only hands
@@ -16,15 +22,24 @@ const ESC = '\x1b';
 const GRAPHICS_START = `${ESC}_G`;
 const GRAPHICS_END = `${ESC}\\`;
 
+/**
+ * What is in the file. Raw has to declare its dimensions because, unlike a
+ * PNG, it carries no header for the terminal to read them from.
+ */
+export type KittyImage =
+  | { format: 'png' }
+  | { format: 'rgba'; pixelWidth: number; pixelHeight: number };
+
 export interface KittyPlacement {
   /** Stable image id, so each frame replaces the last instead of stacking. */
   id: number;
   cols: number;
   rows: number;
+  image: KittyImage;
 }
 
 /**
- * Transmit the PNG at `filePath` and declare a VIRTUAL placement (`U=1`) of
+ * Transmit the frame at `filePath` and declare a VIRTUAL placement (`U=1`) of
  * `cols x rows` cells for it.
  *
  * Virtual means invisible: the terminal draws nothing, moves no cursor, and
@@ -40,11 +55,14 @@ export interface KittyPlacement {
  */
 export function kittyTransmitVirtual(filePath: string, placement: KittyPlacement): string {
   const payload = Buffer.from(filePath, 'utf-8').toString('base64');
+  const { image } = placement;
   const control = [
     'a=T', // transmit and create the placement...
     'U=1', // ...but a virtual one: nothing is drawn at the cursor
-    'f=100', // payload is a PNG
-    't=f', // ...referenced by file path
+    image.format === 'rgba' ? 'f=32' : 'f=100',
+    't=f', // payload is the file PATH, not the bytes
+    // Raw data has no header, so its size has to be stated.
+    ...(image.format === 'rgba' ? [`s=${image.pixelWidth}`, `v=${image.pixelHeight}`] : []),
     `i=${placement.id}`,
     `c=${placement.cols}`,
     `r=${placement.rows}`,

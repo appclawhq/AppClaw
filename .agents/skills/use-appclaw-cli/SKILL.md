@@ -121,7 +121,7 @@ One shell, two modes, decided by what a plain (non-slash) line means:
 
 `--playground` is an alias for `--tui` — the old playground REPL was removed. (`--json --playground` is different: a headless NDJSON bridge used by the VS Code / Cursor extension, not something to run by hand.)
 
-Full-screen Ink shell: platform/device picker, slash-command palette, settings, run history. Device mirroring (Android only) draws the screen **inside the terminal** — Kitty graphics on Ghostty/kitty/WezTerm, 24-bit ANSI half-blocks everywhere else — at ~5fps via `adb screencap`. Start it with `^r` or `/stream`, freeze it with `^p`, tear it down with `^x`; `--stream` starts it as soon as the session opens, which is the only way to see it during `appclaw "a goal"`. Requires an interactive terminal; incompatible with `--json`.
+Full-screen Ink shell: platform/device picker, slash-command palette, settings, run history. Device mirroring draws the screen **inside the terminal** — Kitty graphics on Ghostty/kitty/WezTerm, 24-bit ANSI half-blocks everywhere else — via `adb screencap` on Android and `xcrun simctl io … screenshot` on an iOS simulator, inside a drawn device body. Frame rate is device-bound: ~5fps on a fast Android device, ~3fps on a simulator, and as low as ~1fps on a software-rendered emulator. Start it with `^r` or `/stream`, freeze it with `^p`, tear it down with `^x`; `--stream` starts it as soon as the session opens, which is the only way to see it during `appclaw "a goal"`. Requires an interactive terminal; incompatible with `--json`.
 
 ### 4. Explorer — PRD to test flows
 

@@ -95,9 +95,32 @@ describe('renderHalfBlocks', () => {
     expect(lines).toHaveLength(3);
     for (const line of lines) {
       expect(line.endsWith('\x1b[0m')).toBe(true);
-      // One upper-half-block per column — two source pixels per cell.
+      // One upper-half-block per column — two source pixels per cell. Android
+      // is unmasked, so no cell is ever a space or a lower half here.
       expect([...line].filter((c) => c === '▀')).toHaveLength(4);
     }
+  });
+
+  test('the rounded corners come out as the terminal background, not black', () => {
+    // The whole point of masking here rather than taking simctl's --mask=black:
+    // a masked half emits the DEFAULT background (\x1b[49m) so the panel behind
+    // shows through on any theme, instead of painting a black wedge.
+    const frame = parseRawScreencap(framebuffer(120, 260, 12)); // phone-shaped
+    const [first, ...rest] = renderHalfBlocks(frame, 12, 24, 'ios');
+    expect(first).toContain('\x1b[49m');
+    expect(first).not.toContain('48;2;0;0;0m');
+    // A row through the middle of the screen is nowhere near a corner, so it
+    // must be fully painted — the mask has to be local, not a global tint.
+    const middle = rest[Math.floor(rest.length / 2)];
+    expect(middle).not.toContain('\x1b[49m');
+  });
+
+  test('a corner cell with both halves outside the mask is blank', () => {
+    // At a real phone resolution the arc is wide enough to swallow whole cells,
+    // which must come out as a space rather than a half block of any colour.
+    const frame = parseRawScreencap(framebuffer(600, 1300, 12));
+    const [first] = renderHalfBlocks(frame, 22, 24, 'ios');
+    expect(first.startsWith('\x1b[49m ')).toBe(true);
   });
 
   test('carries 24-bit foreground and background colours', () => {
@@ -124,27 +147,42 @@ describe('renderHalfBlocks', () => {
 
 describe('kitty escape sequences', () => {
   test('transmits by path, base64-encoded, sized in cells', () => {
-    const seq = kittyTransmitVirtual('/tmp/frame-0.png', { id: 7, cols: 40, rows: 50 });
+    const seq = kittyTransmitVirtual('/tmp/frame-0.rgba', {
+      id: 7,
+      cols: 40,
+      rows: 50,
+      image: { format: 'rgba', pixelWidth: 1206, pixelHeight: 2622 },
+    });
     expect(seq.startsWith('\x1b_G')).toBe(true);
     expect(seq.endsWith('\x1b\\')).toBe(true);
     const [control, payload] = seq.slice(3, -2).split(';');
     expect(control).toContain('a=T');
-    expect(control).toContain('f=100');
+    // Raw RGBA rather than a PNG: iOS carries the corner mask in its alpha
+    // channel, and neither simctl nor a PNG will supply one.
+    expect(control).toContain('f=32');
     expect(control).toContain('t=f');
+    // Raw data carries no header, so the pixel size has to be declared.
+    expect(control).toContain('s=1206');
+    expect(control).toContain('v=2622');
     expect(control).toContain('i=7');
     expect(control).toContain('c=40');
     expect(control).toContain('r=50');
     // q=2 suppresses the terminal's reply, which would otherwise land on the
     // stdin Ink is reading in raw mode.
     expect(control).toContain('q=2');
-    expect(Buffer.from(payload, 'base64').toString('utf-8')).toBe('/tmp/frame-0.png');
+    expect(Buffer.from(payload, 'base64').toString('utf-8')).toBe('/tmp/frame-0.rgba');
   });
 
   test('the placement is virtual, so nothing is drawn at the cursor', () => {
     // U=1 is the whole point: the image is only a prototype for the U+10EEEE
     // cells Ink renders. Without it the terminal would paint at the cursor,
     // which is exactly the absolute-coordinate painting this replaced.
-    const seq = kittyTransmitVirtual('/tmp/frame-0.png', { id: 7, cols: 4, rows: 5 });
+    const seq = kittyTransmitVirtual('/tmp/frame-0.png', {
+      id: 7,
+      cols: 4,
+      rows: 5,
+      image: { format: 'png' },
+    });
     expect(seq.slice(3, -2).split(';')[0]).toContain('U=1');
     // No cursor movement anywhere in the sequence.
     expect(seq).not.toMatch(/\x1b\[\d+;\d+H/);
@@ -366,5 +404,24 @@ describe('detectStreamBackend', () => {
     expect(
       detectStreamBackend({ TERM_PROGRAM: 'ghostty', APPCLAW_STREAM_BACKEND: 'halfblock' })
     ).toBe('halfblock');
+  });
+});
+
+describe('kitty payload format', () => {
+  test('Android sends a PNG, so it never pays for pixels it would only re-encode', () => {
+    // Android is not masked, so it needs no alpha channel — and pulling ~10MB
+    // of raw framebuffer over adb instead of a ~2MB PNG would cost frame rate
+    // for nothing.
+    const seq = kittyTransmitVirtual('/tmp/f.png', {
+      id: 1,
+      cols: 4,
+      rows: 5,
+      image: { format: 'png' },
+    });
+    const control = seq.slice(3, -2).split(';')[0];
+    expect(control).toContain('f=100');
+    // A PNG carries its own header, so the size must NOT be declared.
+    expect(control).not.toMatch(/[,^]s=/);
+    expect(control).not.toMatch(/[,^]v=/);
   });
 });
