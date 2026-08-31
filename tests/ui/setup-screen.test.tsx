@@ -230,14 +230,16 @@ describe('settings', () => {
   test('a secret is masked in the list, keeping only its last four characters', async () => {
     tuiStore.setSettingsFields([
       { key: 'LLM_PROVIDER', value: 'gemini' },
-      { key: 'LLM_API_KEY', value: 'AIzaSyD-9tSrke72PouQMnMX-a7eZSW0jkFMBWY', secret: true },
+      // Deliberately not credential-shaped: a valid-looking key in a fixture
+      // trips secret scanners and invites someone to paste a real one here.
+      { key: 'LLM_API_KEY', value: 'not-a-real-key-0000000000000000000WXYZ', secret: true },
     ]);
     tuiStore.goTo('settings');
     const { frame, instance } = mount();
     await settle();
     const text = frame().join('\n');
-    expect(text).not.toContain('AIzaSyD-9tSrke72PouQMnMX-a7eZSW0jkFMBW');
-    expect(text).toContain('••••••••MBWY');
+    expect(text).not.toContain('not-a-real-key-0000000000000000000');
+    expect(text).toContain('••••••••WXYZ');
     // Non-secret fields are untouched.
     expect(text).toContain('gemini');
     instance.unmount();
