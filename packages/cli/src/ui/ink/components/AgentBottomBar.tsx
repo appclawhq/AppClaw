@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Box, Text, useStdout } from 'ink';
 import { COLORS } from '../theme.js';
 import type { RunContext } from '../store.js';
+import { useRunWidth } from '../width.js';
 
 interface Props {
   ctx: RunContext;
@@ -28,7 +29,7 @@ function truncate(s: string, n: number): string {
  */
 export function AgentBottomBar({ ctx, currentStep, maxSteps, startTime, tokens }: Props) {
   const { stdout } = useStdout();
-  const width = Math.min(stdout?.columns ?? 80, 80);
+  const width = Math.min(useRunWidth(stdout?.columns), 80);
 
   const [now, setNow] = useState(Date.now());
   useEffect(() => {

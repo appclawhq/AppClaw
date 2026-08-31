@@ -4,26 +4,12 @@ import { COLORS, symbols } from '../../ui/ink/theme.js';
 import type { Platform } from '../store.js';
 import { requestQuit, type TuiActions } from '../commands.js';
 import { StatusBar } from '../components/StatusBar.js';
+import { Wordmark } from '../components/Wordmark.js';
 import { subscribe, getSnapshot } from '../store.js';
 
 const OPTIONS: Platform[] = ['android', 'ios'];
 
 const LABELS: Record<Platform, string> = { android: 'Android', ios: 'iOS' };
-
-/**
- * Block-letter wordmark. Terminals can't scale a font, so "bigger" has to be
- * drawn — one glyph per 5 rows of block characters.
- */
-const BANNER = [
-  ' █████  ██████  ██████   ██████ ██       █████  ██     ██',
-  '██   ██ ██   ██ ██   ██ ██      ██      ██   ██ ██     ██',
-  '███████ ██████  ██████  ██      ██      ███████ ██  █  ██',
-  '██   ██ ██      ██      ██      ██      ██   ██ ██ ███ ██',
-  '██   ██ ██      ██       ██████ ███████ ██   ██  ███ ███ ',
-];
-
-/** Widest banner row plus the frame's border+padding, below which we fall back to plain text. */
-const BANNER_MIN_COLUMNS = 57 + 8;
 
 export interface WelcomeScreenProps {
   actions: TuiActions;
@@ -39,8 +25,6 @@ export function WelcomeScreen({ actions }: WelcomeScreenProps) {
   const ui = useSyncExternalStore(subscribe, getSnapshot);
   const { stdout } = useStdout();
   const rows = stdout.rows || 24;
-  const columns = stdout.columns || 80;
-  const showBanner = columns >= BANNER_MIN_COLUMNS;
 
   useInput((input, key) => {
     if (input === 'q' && !key.ctrl && !key.meta) {
@@ -64,19 +48,7 @@ export function WelcomeScreen({ actions }: WelcomeScreenProps) {
         paddingX={2}
         paddingY={1}
       >
-        {showBanner ? (
-          <Box flexDirection="column" alignItems="center">
-            {BANNER.map((line, i) => (
-              <Text key={i} color={COLORS.brand} bold>
-                {line}
-              </Text>
-            ))}
-          </Box>
-        ) : (
-          <Text color={COLORS.brand} bold>
-            {symbols.diamond} AppClaw
-          </Text>
-        )}
+        <Wordmark />
 
         <Box marginTop={1}>
           <Text color={COLORS.dimmed}>Agentic mobile automation</Text>

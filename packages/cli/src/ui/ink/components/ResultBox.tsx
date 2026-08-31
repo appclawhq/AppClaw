@@ -2,11 +2,12 @@ import React from 'react';
 import { Box, Text, useStdout } from 'ink';
 import { COLORS, symbols } from '../theme.js';
 import type { ResultData } from '../store.js';
+import { useRunWidth } from '../width.js';
 
 /** Final outcome panel — success or failure. Token/cost shown separately. */
 export function ResultBox({ result, durationMs }: { result: ResultData; durationMs: number }) {
   const { stdout } = useStdout();
-  const W = Math.min((stdout?.columns ?? 80) - 4, 100);
+  const W = Math.min(useRunWidth(stdout?.columns) - 4, 100);
   const ok = result.status === 'success';
   const color = ok ? COLORS.green : COLORS.red;
   const icon = ok ? symbols.check : symbols.cross;

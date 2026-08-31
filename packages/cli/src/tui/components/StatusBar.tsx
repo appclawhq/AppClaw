@@ -27,9 +27,15 @@ export function StatusBar({ breadcrumb, hints, message }: StatusBarProps) {
       paddingX={1}
     >
       <Box justifyContent="space-between">
-        <Text color={COLORS.brand} bold wrap="truncate">
-          {breadcrumb}
-        </Text>
+        {/* The breadcrumb does not shrink: Yoga would otherwise take the row's
+            overflow out of both children, and "Goa" tells you less than the
+            last hint does. The hints truncate from the right instead, which is
+            why callers order them by how much they matter. */}
+        <Box flexShrink={0} marginRight={2}>
+          <Text color={COLORS.brand} bold wrap="truncate">
+            {breadcrumb}
+          </Text>
+        </Box>
         <Text color={COLORS.dimmed} wrap="truncate">
           {hints.join('  ·  ')}
         </Text>

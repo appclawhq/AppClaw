@@ -2,6 +2,7 @@ import React from 'react';
 import { Box, Text, useStdout } from 'ink';
 import { COLORS, symbols } from '../theme.js';
 import type { JourneySummaryData } from '../store.js';
+import { useRunWidth } from '../width.js';
 
 function fmtDuration(ms: number): string {
   return ms < 60000
@@ -16,7 +17,7 @@ function fmtDuration(ms: number): string {
  */
 export function FinalSummary({ data }: { data: JourneySummaryData }) {
   const { stdout } = useStdout();
-  const W = Math.min((stdout?.columns ?? 80) - 4, 110);
+  const W = Math.min(useRunWidth(stdout?.columns) - 4, 110);
   const inner = W - 4; // inside paddingX=1 borders
   const ok = data.success;
   const color = ok ? COLORS.green : COLORS.red;

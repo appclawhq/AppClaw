@@ -44,13 +44,15 @@ appclaw "open the settings app and turn on airplane mode"
 
 You'll need **Node.js 22+**, a connected device / emulator / simulator, and an **LLM API key** (Anthropic, OpenAI, Google, Groq, or local Ollama). `appclaw doctor` checks all of this in seconds and prints fix hints for anything missing (`--full` also spawns appium-mcp for a real handshake). Full setup → **[appclaw.in](https://appclaw.in)**.
 
-Terminal Studio (`appclaw --tui`) can mirror the device inside the terminal with `/stream` (Android only). It looks best on a terminal that speaks the kitty graphics protocol — Ghostty, kitty, WezTerm — and falls back to half-block characters elsewhere.
+That last command opens **Terminal Studio**, the full-screen shell: bare `appclaw` stays resident so you can run one goal after another, and `appclaw "a goal"` runs it once and holds the finished screen until you press a key. `appclaw --tui` opens the same shell in step-recording mode instead. Add `APPCLAW_TUI=off` for an unattended run that prints to the console and exits on its own.
+
+Terminal Studio can mirror the device inside the terminal — `^r` starts it, `^p` pauses, `^x` closes (Android only; `--stream` starts it from the command line). It looks best on a terminal that speaks the kitty graphics protocol — Ghostty, kitty, WezTerm — and falls back to half-block characters elsewhere.
 
 ## What it can do
 
 - **Agent mode** — plain-English goals; the LLM drives the device (tap, type, swipe)
 - **YAML flows** — deterministic, zero-LLM automation with [structured selectors and state assertions](docs/structured-selectors.md)
-- **Terminal Studio** (`appclaw --tui`) — record steps one at a time, watch the device mirrored in the terminal, then `/export` a runnable spec
+- **Terminal Studio** (`appclaw`, or `appclaw --tui`) — one shell, two modes: describe goals and watch the agent work, or record steps one at a time. Either way the device is mirrored beside it and `/export` turns what just happened into a runnable spec
 - **Test runner** — vitest-style specs across real devices, run with `appclaw test`; scaffold with `appclaw init`
 - **SDK** — drive AppClaw from your own vitest / jest / mocha
 - **Cloud devices, record & replay, PRD explorer**, and more

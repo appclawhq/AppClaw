@@ -1943,11 +1943,22 @@
               </tr>
               <tr>
                 <td>--tui</td>
-                <td>Launch Terminal Studio — step recorder, device picker, device mirroring</td>
+                <td>
+                  Open Terminal Studio in <strong>step-recording</strong> mode. Bare
+                  <code>appclaw</code> opens the same shell in goal mode
+                </td>
               </tr>
               <tr>
                 <td>--playground</td>
                 <td>Alias for <code>--tui</code></td>
+              </tr>
+              <tr>
+                <td>--stream</td>
+                <td>
+                  Mirror the device as soon as the session opens &mdash; the only way to see it
+                  during <code>appclaw "a goal"</code>, which never shows a prompt to type
+                  <code>^r</code> at
+                </td>
               </tr>
               <tr>
                 <td>--export [path]</td>
@@ -2022,6 +2033,28 @@
             </div>
             <pre><span class="k">appclaw</span> <span class="s">"Search for 'Appium 3.0' on YouTube and find the TestMu AI video"</span></pre>
           </div>
+          <p>
+            Both this and bare <code>appclaw</code> open
+            <a href="#terminal-studio">Terminal Studio</a> in <strong>goal mode</strong>: the plan,
+            the live step and the device screen side by side. Bare, it stays resident so you can run
+            one goal after another; with a goal argument it runs once and then
+            <strong>holds the finished screen until you press a key</strong> &mdash; leaving would
+            erase the summary and the last frame, which is the whole point of having watched. It
+            exits 0 when every sub-goal completed, 1 otherwise.
+          </p>
+          <p>
+            For an unattended run &mdash; CI, a script, anything reading the output &mdash; set
+            <code>APPCLAW_TUI=off</code> (or just run it without a TTY). That takes the plain
+            console path and exits on its own. <code>--record</code> and <code>--json</code> do the
+            same.
+          </p>
+          <div class="code-block">
+            <div class="code-block-header">
+              <div class="code-block-dots"><span></span><span></span><span></span></div>
+              <span class="code-block-label">Unattended</span>
+            </div>
+            <pre>APPCLAW_TUI=off <span class="k">appclaw</span> <span class="s">"Open Settings and turn on airplane mode"</span></pre>
+          </div>
 
           <h3><span class="badge badge-teal">YAML Flows</span></h3>
           <p>
@@ -2038,18 +2071,23 @@
 
           <h3><span class="badge badge-purple">Terminal Studio</span></h3>
           <p>
-            A full-screen terminal workspace where you type one instruction at a time and see it
-            execute immediately, alongside a device picker, a slash-command palette and optional
-            device mirroring. Great for exploring an app and building flows interactively.
-            <code>--playground</code> is an alias for it.
+            A full-screen terminal workspace with a device picker, a slash-command palette and
+            optional device mirroring. It has two modes, and which one you get depends on how you
+            started it: bare <code>appclaw</code> opens <strong>goal mode</strong>, where a plain
+            line is a goal for the agent; <code>appclaw --tui</code> opens
+            <strong>record mode</strong>, where a plain line is one instruction, executed
+            immediately and recorded. <code>/mode</code> switches between them without dropping the
+            device session. <code>--playground</code> is an alias for <code>--tui</code>.
           </p>
           <p>
-            <strong>Requirements.</strong> The shell itself needs only an interactive terminal (at
-            least 27 rows — it will tell you if the window is too small). The optional device
-            mirroring is Android-only: <code>/stream</code> mirrors the screen <em>inside</em> the
-            shell. Terminals that support the kitty graphics protocol (Ghostty, kitty, WezTerm) show
-            real pixels; everywhere else falls back to coloured half-block characters. No install
-            needed.
+            <strong>Requirements.</strong> The shell itself needs only an interactive terminal (29
+            rows for the prompt screen, 18 for a run &mdash; it says so rather than drawing a broken
+            frame if the window is smaller). A missing <code>LLM_API_KEY</code> is not fatal here:
+            the shell opens on a setup screen that names the problem and offers to write the key,
+            since it can already edit <code>.env</code>. The optional device mirroring is
+            Android-only: <code>^r</code> mirrors the screen <em>inside</em> the shell. Terminals
+            that support the kitty graphics protocol (Ghostty, kitty, WezTerm) show real pixels;
+            everywhere else falls back to coloured half-block characters. No install needed.
           </p>
           <div class="code-block">
             <div class="code-block-header">
@@ -2094,16 +2132,54 @@
         <section id="terminal-studio" class="reveal">
           <h2>Terminal Studio</h2>
           <p>
-            <code>appclaw --tui</code> is a full-screen terminal workspace for building a flow by
-            hand: you type one instruction at a time, it runs on the device immediately, and every
-            step that succeeds is recorded. When the flow looks right, <code>/export</code> turns it
-            into a runnable spec. <code>--playground</code> is an alias for it.
+            A full-screen terminal workspace, and the default face of AppClaw. One shell, two modes,
+            and the only difference between them is what a plain (non-slash) line means.
+            <code>--playground</code> is an alias for <code>--tui</code>.
+          </p>
+          <table class="cmd-table">
+            <thead>
+              <tr>
+                <th>Mode</th>
+                <th>Opened by</th>
+                <th>A plain line&hellip;</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Goal</strong></td>
+                <td><code>appclaw</code> &middot; <code>appclaw "a goal"</code></td>
+                <td>
+                  is a goal. The agent plans it, works through it, and the run takes over the left
+                  column. Nothing is recorded
+                </td>
+              </tr>
+              <tr>
+                <td><strong>Record</strong></td>
+                <td><code>appclaw --tui</code></td>
+                <td>
+                  is one deterministic instruction. It runs on the device immediately, and every
+                  step that succeeds is appended to a recording
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <p>
+            <code>/mode goal</code> and <code>/mode record</code> switch between them without
+            dropping the device session, and <code>/goal &lt;text&gt;</code> runs the agent from
+            either. In both, <code>/export</code> turns what just happened into a runnable spec
+            &mdash; the recorded steps in record mode, the last agent run in goal mode.
           </p>
 
           <h3>The layout</h3>
           <p>
             Two columns. On the left, a scrollable transcript of everything that has run, the
             command palette, and the prompt. On the right, the device screen, mirrored live.
+          </p>
+          <p>
+            Goal mode hides the command list until you type <code>/</code>: a plain line there is a
+            goal, not a command, so the list would be a menu for nothing &mdash; the transcript gets
+            those rows instead. It reappears the moment the line starts with a slash, where it is a
+            live filter.
           </p>
           <div class="tui-diagram">
             <div class="tui-bar"><i></i><i></i><i></i><span>appclaw --tui</span></div>
@@ -2133,7 +2209,7 @@
                   <div class="line">
                     <span class="cmd">/export</span> <span class="dim">Export steps</span>
                   </div>
-                  <div class="line dim">… +14 more — type / to filter</div>
+                  <div class="line dim">… +23 more — type / to filter</div>
                 </div>
                 <div class="pane muted prompt">
                   <span class="in">❯</span><span class="dim">type a step or /command</span>
@@ -2147,6 +2223,7 @@
               </div>
             </div>
             <div class="note">
+              <span>^r mirror</span>
               <span>↑↓ history</span>
               <span>tab complete</span>
               <span>⇧tab focus</span>
@@ -2154,7 +2231,7 @@
             </div>
           </div>
 
-          <h3>Recording steps</h3>
+          <h3>Recording steps &mdash; record mode</h3>
           <p>
             Anything you type that is <em>not</em> a slash command runs as a single deterministic
             instruction and is appended to the recording. A step that fails is reported but not
@@ -2165,6 +2242,60 @@
             agent, which may take many steps to get there. Agent runs are <strong>not</strong>
             recorded &mdash; use it to explore, then record the steps you settle on.
           </p>
+
+          <h3>Running goals &mdash; goal mode</h3>
+          <p>
+            A plain line is a goal. The left column becomes the agent-run view &mdash; the plan as a
+            checklist, the step in flight, the token and cost footer &mdash; while the device stays
+            mirrored beside it, because watching the phone is most useful exactly while the agent is
+            driving it.
+          </p>
+          <table class="cmd-table">
+            <thead>
+              <tr>
+                <th>Key</th>
+                <th>During a run</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>Esc</code></td>
+                <td>
+                  Ask the run to stop. Cooperative &mdash; it lands once the action in flight
+                  finishes, so the screen says &ldquo;stopping&hellip;&rdquo; rather than pretending
+                  it was instant
+                </td>
+              </tr>
+              <tr>
+                <td><code>p</code> &middot; <code>Ctrl</code>+<code>P</code></td>
+                <td>Freeze the device mirror on its last frame, and unfreeze it</td>
+              </tr>
+              <tr>
+                <td><code>Ctrl</code>+<code>C</code></td>
+                <td>Quit</td>
+              </tr>
+            </tbody>
+          </table>
+          <p>
+            When the run ends, the summary is written into the transcript as well as drawn on the
+            run screen &mdash; what each sub-goal did and found, the steps, the duration and the
+            cost &mdash; so going back to the prompt does not take it with you. Then
+            <code>/export</code> writes that run out as a replayable
+            <strong>@appclaw/runner spec</strong>, the same artifact
+            <code>appclaw "a goal" --export</code> produces. That is the loop the shell is for:
+            iterate on a goal until it does the right thing, then freeze it into a deterministic
+            test.
+          </p>
+          <div class="code-block">
+            <div class="code-block-header">
+              <div class="code-block-dots"><span></span><span></span><span></span></div>
+              <span class="code-block-label">Goal, then spec</span>
+            </div>
+            <pre><span class="c"># At the shell prompt:</span>
+open settings and read the connected wifi name
+/export                  <span class="c"># → tests/open-settings-and-read-the-connected-wifi-name.test.ts</span>
+/export wifi.test.ts     <span class="c"># → tests/wifi.test.ts, run with: appclaw test wifi</span></pre>
+          </div>
 
           <h3>Commands</h3>
           <p>
@@ -2190,7 +2321,8 @@
               <tr>
                 <td><code>/export [file]</code></td>
                 <td>
-                  Write a runner spec (<code>.spec.ts</code>) or YAML flow (<code>.yaml</code>)
+                  Write a runner spec (<code>.spec.ts</code>) or YAML flow (<code>.yaml</code>) from
+                  the recorded steps &mdash; or, in goal mode, from the last agent run
                 </td>
               </tr>
               <tr>
@@ -2206,11 +2338,21 @@
               </tr>
               <tr>
                 <td><code>/goal &lt;text&gt;</code></td>
-                <td>Run the autonomous agent (not recorded)</td>
+                <td>Run the autonomous agent (not recorded) &mdash; works in either mode</td>
               </tr>
               <tr>
-                <td><code>/stream</code> · <code>/stream-close</code></td>
-                <td>Mirror the device in the side panel, or stop mirroring</td>
+                <td><code>/mode</code> · <code>/record</code></td>
+                <td>Switch between goal and record mode, keeping the device session</td>
+              </tr>
+              <tr>
+                <td>
+                  <code>/stream</code> · <code>/stream-pause</code> · <code>/stream-close</code>
+                </td>
+                <td>
+                  Mirror the device in the side panel, freeze it on its last frame, or stop
+                  mirroring. <code>^r</code> <code>^p</code> <code>^x</code> do the same without
+                  typing
+                </td>
               </tr>
               <tr>
                 <td><code>/device</code> · <code>/platform</code></td>
@@ -2252,11 +2394,29 @@
                 <td>&mdash;</td>
               </tr>
               <tr>
+                <td><code>Ctrl</code>+<code>R</code></td>
+                <td colspan="2">Start mirroring the device, or resume a paused mirror</td>
+              </tr>
+              <tr>
+                <td><code>Ctrl</code>+<code>P</code></td>
+                <td colspan="2">Freeze the mirror on its last frame, and unfreeze it</td>
+              </tr>
+              <tr>
+                <td><code>Ctrl</code>+<code>X</code></td>
+                <td colspan="2">Stop mirroring and clear the panel</td>
+              </tr>
+              <tr>
                 <td><code>Ctrl</code>+<code>C</code></td>
                 <td colspan="2">Quit (asks first if steps are unexported)</td>
               </tr>
             </tbody>
           </table>
+          <p>
+            The mirror keys are <code>Ctrl</code> chords rather than bare letters because the prompt
+            is a text input &mdash; a bare <code>p</code> is part of the goal you are typing. They
+            work during an agent run too, which is the only way to start the mirror once a run
+            already owns the screen. The status bar always names the ones that apply right now.
+          </p>
           <p>
             History is per-session and never written to disk. Typing any character while the
             transcript has focus jumps back to the prompt and keeps the keystroke.
@@ -2264,9 +2424,17 @@
 
           <h3 id="stream-requirements">Mirroring the device</h3>
           <p>
-            <code>/stream</code> draws the device screen in the right-hand panel a few times a
-            second while the prompt stays usable. How it draws depends on your terminal, and it
-            always works &mdash; the only question is fidelity.
+            <code>^r</code> (or <code>/stream</code>) draws the device screen in the right-hand
+            panel a few times a second while the prompt stays usable. <code>^p</code> freezes it on
+            its last frame &mdash; useful when you want to read something the agent is about to
+            navigate away from &mdash; and <code>^x</code> tears it down. Pausing keeps the picture
+            on screen and costs nothing; closing removes it. On the command line,
+            <code>--stream</code> starts it as soon as the session opens, which is the only way to
+            see it during <code>appclaw "a goal"</code>, since that form never shows a prompt.
+          </p>
+          <p>
+            How it draws depends on your terminal, and it always works &mdash; the only question is
+            fidelity.
           </p>
           <table class="cmd-table">
             <thead>
