@@ -7,6 +7,8 @@ import { DevicePickerScreen } from './screens/DevicePickerScreen.js';
 import { MainScreen } from './screens/MainScreen.js';
 import { SettingsScreen } from './screens/SettingsScreen.js';
 import { HistoryScreen } from './screens/HistoryScreen.js';
+import { GoalRunScreen } from './screens/GoalRunScreen.js';
+import { SetupScreen } from './screens/SetupScreen.js';
 import { ProgressDialog } from './components/ProgressDialog.js';
 import { OutputDialog } from './components/OutputDialog.js';
 import { ConfirmDialog } from './components/ConfirmDialog.js';
@@ -89,9 +91,16 @@ export function TuiApp({ actions }: TuiAppProps) {
 
   return (
     <Box flexDirection="column" paddingX={1}>
+      {ui.screen === 'setup' && <SetupScreen actions={actions} />}
       {ui.screen === 'welcome' && <WelcomeScreen actions={actions} />}
       {ui.screen === 'device-picker' && <DevicePickerScreen actions={actions} />}
       {ui.screen === 'main' && <MainScreen actions={actions} />}
+      {/* A goal run owns the screen: the agent-loop UI on the left, the device
+          mirror on the right, and nothing to type at while the agent drives.
+          Inside the shared padded Box like every other screen — layout.ts
+          budgets for that padding (APP_PADDING_COLS), and the stream panel's
+          placeholder rows are sized on the assumption it is there. */}
+      {ui.screen === 'run' && <GoalRunScreen goal={ui.runningGoal} actions={actions} />}
       {ui.screen === 'settings' && <SettingsScreen actions={actions} />}
       {ui.screen === 'history' && <HistoryScreen actions={actions} />}
     </Box>

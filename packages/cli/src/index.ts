@@ -13,12 +13,10 @@
 import { resolve } from 'path';
 import { config as loadDotenvFile } from 'dotenv';
 import { VERSION } from '@appclaw/core/version';
-import { refreshConfig } from '@appclaw/core/config';
+import { safeRefreshConfig, formatConfigIssues } from '@appclaw/core/config';
 import { createMCPClient } from '@appclaw/core/mcp/client';
-import { createLLMProvider, buildModel, buildThinkingOptions } from '@appclaw/core/llm/provider';
-import { getScreenState } from '@appclaw/core/perception/screen';
+import { createLLMProvider } from '@appclaw/core/llm/provider';
 import { AppResolver } from '@appclaw/core/agent/app-resolver';
-import { runAgent } from '@appclaw/core/agent/loop';
 import { SessionLogger } from '@appclaw/core/logger';
 import { ActionRecorder } from './recording/recorder.js';
 import { loadRecording, replayRecording } from './recording/replayer.js';
@@ -36,23 +34,16 @@ import {
 } from '@appclaw/core/flow/parallel-runner';
 import { readFileSync, existsSync } from 'fs';
 import { loadEnvironmentFile, type VariableBindings } from '@appclaw/core/flow/variable-resolver';
-import {
-  decomposeGoal,
-  createPlanExecutor,
-  evaluateSubGoal,
-  evaluateScreen,
-  assessScreenReadiness,
-} from '@appclaw/core/agent/planner';
 import { RunArtifactCollector } from '@appclaw/core/report/writer';
 import { startReportServer } from '@appclaw/core/report/server';
 import { DEFAULT_MODELS } from '@appclaw/core/constants';
 import { getStarkVisionModel } from '@appclaw/core/vision/locate-enabled';
-import { prepareScreenshotForLlm } from '@appclaw/core/vision/prepare-screenshot-for-llm';
 import { runExplorer } from './explorer/index.js';
 import type { ExplorerConfig } from './explorer/types.js';
 import { runTui } from './tui/index.js';
+import { runGoalSession, type GoalSessionOutcome } from './goal-session.js';
+import { writeGoalExport } from './goal-export-file.js';
 import { setupDevice } from '@appclaw/core/device/index';
-import { loadAppGuide } from '@appclaw/core/appguides/index';
 import * as ui from '@appclaw/core/ui/terminal';
 import { silenceTerminalUI } from '@appclaw/core/ui/terminal';
 import { activateInk, deactivateInk, shouldUseInk } from './ui/ink/InkRenderer.js';
@@ -98,6 +89,13 @@ interface CLIArgs {
   /** Strict YAML parsing — fail on unrecognized steps instead of LLM fallback */
   strict: boolean;
   /**
+   * Mirror the device in Terminal Studio's side panel as soon as a session is
+   * open, without waiting for someone to type `/stream`. The only way to get
+   * the picture during `appclaw "a goal"`, which runs the goal the moment it
+   * connects and never shows a prompt. Android only (adb screencap).
+   */
+  stream: boolean;
+  /**
    * When set, write a replayable SDK vitest spec to this path after a goal-mode
    * run completes. Empty string means "default path" (EXPORT_DIR/<slug>.test.ts).
    * Null means no export.
@@ -125,6 +123,10 @@ function printHelp(): void {
 
   console.log();
   console.log(`  ${c.brand('appclaw')} ${c.desc('[options] [goal]')}`);
+  console.log();
+  console.log(
+    `  ${c.desc('With no goal, opens Terminal Studio in goal mode. With a goal, runs it there once and exits.')}`
+  );
   console.log();
 
   // ── Platform & Device ──
@@ -164,7 +166,10 @@ function printHelp(): void {
     `    ${c.flag('--caps')} ${c.arg('<path>')}                ${c.desc('JSON file of extra Appium capabilities merged into the session')}`
   );
   console.log(
-    `    ${c.flag('--tui')}                          ${c.desc('Terminal Studio: step recorder, device picker, device stream')}`
+    `    ${c.flag('--tui')}                          ${c.desc('Terminal Studio in step-recording mode (/mode goal to switch)')}`
+  );
+  console.log(
+    `    ${c.flag('--stream')}                       ${c.desc('Mirror the device in the side panel from the start (Android)')}`
   );
   console.log(
     `    ${c.flag('--playground')}                    ${c.desc('Alias for --tui (with --json: headless NDJSON bridge for IDEs)')}`
@@ -286,6 +291,7 @@ function parseArgs(): CLIArgs {
   let playground = false;
   let tui = false;
   let plan = false;
+  let stream = false;
   let explore: string | null = null;
   let report = false;
   let reportPort = 4173;
@@ -339,6 +345,8 @@ function parseArgs(): CLIArgs {
       playground = true;
     } else if (args[i] === '--tui') {
       tui = true;
+    } else if (args[i] === '--stream') {
+      stream = true;
     } else if (args[i] === '--plan') {
       plan = true;
     } else if (args[i] === '--explore') {
@@ -399,6 +407,7 @@ function parseArgs(): CLIArgs {
     playground,
     tui,
     plan,
+    stream,
     explore,
     report,
     reportPort,
@@ -422,34 +431,26 @@ function parseArgs(): CLIArgs {
   };
 }
 
-/** Build a filesystem-safe slug from a goal string for default export paths. */
-function slugForExport(goal: string): string {
-  const slug = goal
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 60);
-  return slug || 'goal-replay';
-}
-
 /**
- * Resolve the final on-disk path for a `--export` write.
+ * Will Terminal Studio open for this invocation?
  *
- * Rules (in order of precedence):
- * - Empty `cliPath` → `<dir>/<slug>.test.ts` (slug derived from the goal).
- * - `cliPath` is absolute or contains a directory separator → use verbatim.
- *   This lets users override the configured dir with `--export ./tests/foo.test.ts`.
- * - `cliPath` is a bare filename (no separators) → `<dir>/<cliPath>`.
- *
- * `dir` comes from `--export-dir`, the `EXPORT_DIR` env var, or the default.
+ * Two callers need the same answer and must not drift: the config guard (the
+ * shell is the one path that can *fix* a bad `.env`, so it is allowed to start
+ * with one) and the goal-mode route itself. `--record`, `--json`, a non-TTY and
+ * `APPCLAW_TUI=off` all opt out, which is what keeps CI and piped output on the
+ * plain console path.
  */
-function resolveExportPath(cliPath: string, dir: string, goal: string): string {
-  const pathMod = require('path') as typeof import('path');
-  if (!cliPath) return pathMod.join(dir, `${slugForExport(goal)}.test.ts`);
-  if (pathMod.isAbsolute(cliPath) || cliPath.includes(pathMod.sep) || cliPath.includes('/')) {
-    return cliPath;
-  }
-  return pathMod.join(dir, cliPath);
+function opensTerminalStudio(cliArgs: CLIArgs): boolean {
+  // Modes that own the process before the shell is ever considered.
+  if (cliArgs.report || cliArgs.replay || cliArgs.explore || cliArgs.flow) return false;
+  if (isJsonMode()) return false;
+  if (cliArgs.tui || cliArgs.playground) return true;
+  return (
+    !cliArgs.record &&
+    shouldUseInk() &&
+    process.env.APPCLAW_TUI !== 'off' &&
+    process.env.APPCLAW_TUI !== 'plain'
+  );
 }
 
 async function main() {
@@ -485,7 +486,23 @@ async function main() {
   // and vision/locate-enabled import that singleton by reference, so without this
   // an --env-file `AGENT_MODE=vision` would be ignored and execution would fall
   // back to DOM mode. Returns the same merged config used below.
-  const config = refreshConfig();
+  const { config, issues: configProblems } = safeRefreshConfig();
+
+  // A rejected value in `.env` used to throw out of core's import-time
+  // `loadConfig()` — before `main()` existed to catch it — so Node printed a
+  // raw ZodError and a stack trace for a typo. Terminal Studio can fix these
+  // (SetupScreen → /settings → write `.env`), so it reports them itself;
+  // every other path stops here rather than silently running on the defaults
+  // the rejected keys fell back to.
+  if (configProblems.length > 0 && !opensTerminalStudio(cliArgs)) {
+    // printError indents the first detail line only, so a multi-issue list has
+    // to carry the rest of the indentation itself.
+    ui.printError(
+      'Invalid configuration',
+      formatConfigIssues(configProblems).split('\n').join('\n    ')
+    );
+    process.exit(1);
+  }
 
   // ─── Report mode (serve execution reports) ──────────────
   if (cliArgs.report) {
@@ -597,6 +614,7 @@ async function main() {
       udid: cliArgs.deviceUdid,
       deviceName: cliArgs.deviceName,
       exportDir: cliArgs.exportDir,
+      stream: cliArgs.stream,
     });
     return;
   }
@@ -981,13 +999,56 @@ async function main() {
 
   // ─── Normal / Record / Plan mode ──────────────────────
 
-  // Validate LLM API key
+  // ─── Terminal Studio, goal mode ────────────────────────
+  //
+  // Bare `appclaw` and `appclaw "a goal"` are the same path; the only thing a
+  // goal argument changes is that nothing has to be prompted for. Both open the
+  // shell, which replaces the readline goal prompt with a real screen and keeps
+  // the device session alive for the next goal — except with a goal argument,
+  // where it runs once and exits with a status code (see RunTuiOptions.goal).
+  //
+  // `--record` stays on the plain path below: the recorder is scoped to a single
+  // run and has no meaning in a resident shell. So do --json, non-TTY and
+  // APPCLAW_TUI=off, which is what keeps CI and piped output working unchanged.
+  // Every mode that owns the process before this point has already returned,
+  // so reaching here means the shell is the answer if it can run at all.
+  if (opensTerminalStudio(cliArgs)) {
+    await runTui({
+      mode: 'goal',
+      goal: cliArgs.goal || null,
+      platform: cliArgs.platform ?? (config.PLATFORM || null),
+      deviceType: cliArgs.deviceType,
+      udid: cliArgs.deviceUdid,
+      deviceName: cliArgs.deviceName,
+      exportDir: cliArgs.exportDir,
+      exportPath: cliArgs.exportPath,
+      stream: cliArgs.stream,
+    });
+    return;
+  }
+
+  // Reached only when the shell was declined above. Terminal Studio reports a
+  // missing key on its own screen and offers to fix it (collectSetupIssues →
+  // SetupScreen); this path has nowhere to do that, so it stays a message and
+  // an exit code.
   if (config.LLM_PROVIDER !== 'ollama' && !config.LLM_API_KEY) {
     ui.printError(
       `LLM_API_KEY is required for provider "${config.LLM_PROVIDER}".`,
       `Set it in .env or as an environment variable.`
     );
     process.exit(1);
+  }
+
+  // The side panel lives in Terminal Studio, so there is nowhere to put a
+  // picture on this path — say so rather than accepting the flag and showing
+  // nothing.
+  if (cliArgs.stream) {
+    ui.printWarning(
+      '--stream needs Terminal Studio; ignoring it. ' +
+        (cliArgs.record
+          ? 'It is not available with --record.'
+          : 'It needs an interactive terminal and no --json.')
+    );
   }
 
   // Get goal (and optionally platform) via interactive prompt
@@ -1067,382 +1128,42 @@ async function main() {
     const appResolver = new AppResolver();
     await appResolver.initialize(agentScopedMcp, resolvedPlatform);
 
-    // ── Detect app ID early — needed for AppGuide in planner + orchestrator ──
-    let journeyAppId: string | undefined;
-    try {
-      const { extractAppIdFromText } = await import('@appclaw/core/memory/fingerprint');
-      journeyAppId = extractAppIdFromText(goal);
-      if (!journeyAppId) {
-        const appMatch = goal.match(
-          /(?:open|launch|start)\s+(?:the\s+)?(\w[\w\s]*?)(?:\s+app|\s+and\b)/i
-        );
-        if (appMatch) {
-          journeyAppId = appResolver.resolve(appMatch[1].trim()) ?? undefined;
-        }
-      }
-    } catch {
-      // Non-critical
-    }
-
-    // Load AppGuide for the target app (if known) — shared by planner, orchestrator, and agent
-    const journeyAppGuide = journeyAppId ? loadAppGuide(journeyAppId) : undefined;
-
-    // ─── Always decompose goals into sub-goals ─────────
-    ui.printPlanStart();
-    const plannerModel = buildModel(config);
-    const thinkingOptions = buildThinkingOptions(config);
-
-    const planResult = await decomposeGoal(goal, plannerModel, thinkingOptions, journeyAppGuide);
-    const executor = createPlanExecutor(planResult.subGoals);
-    ui.stopSpinner();
-
-    emitJson({
-      event: 'plan',
-      data: {
-        goal,
-        subGoals: planResult.subGoals.map((sg) => sg.goal),
-        isComplex: planResult.isComplex,
-      },
-    });
-
     // ── Ink TUI: mount the live agent-loop UI on interactive TTYs only ──
     // (never in --json / piped / SDK). Plain console output is the fallback.
-    // Mounted BEFORE the plan so the plan becomes the first transcript entry
-    // (and is preserved in the scrollback dump on exit).
+    // Mounted from the onPlanned hook so the plan becomes the first transcript
+    // entry (and is preserved in the scrollback dump on exit).
     const useInk = shouldUseInk() && !isJsonMode() && process.env.APPCLAW_TUI !== 'off';
-    if (useInk)
-      activateInk({
-        overallGoal: goal,
-        subGoalTotal: executor.all.length,
-        model: modelName,
-        mode: config.AGENT_MODE,
-        // Per-step rows are debug-only; default view shows sub-goals + outcomes.
-        // Gated by APPCLAW_DEBUG (MCP_DEBUG only adds the MCP traffic lane).
-        showSteps: process.env.APPCLAW_DEBUG === '1' || process.env.APPCLAW_DEBUG === 'true',
-      });
 
-    // Seed the live plan checklist (both simple and complex goals).
-    ui.printPlan(planResult.subGoals, planResult.reasoning);
-
-    // Execute each sub-goal sequentially
-    let subGoalIdx = 0;
-    let totalSteps = 0;
-    let journeyInputTokens = 0;
-    let journeyOutputTokens = 0;
-    let journeyCost = 0;
-    let allDone = false;
-    const journeyStart = Date.now();
-    const allHistory: any[] = [];
-    // exportHistory keeps only the "final successful attempt" per sub-goal —
-    // recovery steps from failed branches are pruned via keepOnlyFinalAttempt.
-    // Kept separate from allHistory so the session logger still records the
-    // complete trajectory (including exploration) for debugging.
-    const exportHistory: any[] = [];
-
+    let outcome: GoalSessionOutcome;
     try {
-      while (!executor.isDone()) {
-        const subGoal = executor.current!;
-
-        // Reset action history between sub-goals for clean context
-        llm.resetHistory();
-
-        // Each sub-goal gets the full MAX_STEPS budget
-        const stepsPerGoal = config.MAX_STEPS;
-
-        // ─── Screen-aware orchestration ─────────────────────
-        // Before executing, check the screen and decide: skip, rewrite, or proceed
-        let effectiveGoal = subGoal.goal;
-
-        if (planResult.isComplex && subGoalIdx > 0) {
-          ui.startSpinner('Reconciling plan with device…', 'orchestrator');
-          try {
-            // Capture DOM and/or screenshot for orchestration between sub-goals.
-            // Match agent loop: skip XML when AGENT_MODE=vision (orchestrator uses screenshot).
-            const captureScreenshot =
-              config.VISION_MODE !== 'never' || config.AGENT_MODE === 'vision';
-            const skipOrchestratorPageSource = config.AGENT_MODE === 'vision';
-            const screenState = await getScreenState(
-              agentScopedMcp,
-              config.MAX_ELEMENTS,
-              captureScreenshot,
-              skipOrchestratorPageSource
-            );
-            const orchestratorDom =
-              skipOrchestratorPageSource && !screenState.dom.trim()
-                ? '(Vision mode: XML page source omitted — use the screenshot for visual state.)'
-                : screenState.dom;
-
-            const orchestratorScreenshot = await prepareScreenshotForLlm(
-              screenState.screenshot,
-              config.LLM_SCREENSHOT_MAX_EDGE_PX
-            );
-
-            // ─── Parallel: Screen readiness + Sub-goal evaluation ──
-            // Run both checks in parallel — they're independent.
-            // If readiness rewrites the goal, we skip the evaluation result.
-            const prevGoal = executor.all[subGoalIdx - 1];
-            const completedGoalsList = executor.all
-              .filter((sg) => sg.status === 'completed')
-              .map((sg) => `${sg.executedAs ?? sg.goal} → ${sg.result}`);
-
-            const [readiness, decision] = await Promise.all([
-              prevGoal
-                ? assessScreenReadiness(
-                    plannerModel,
-                    prevGoal.executedAs ?? prevGoal.goal,
-                    subGoal.goal,
-                    orchestratorDom,
-                    thinkingOptions,
-                    orchestratorScreenshot,
-                    journeyAppGuide
-                  )
-                : Promise.resolve({ ready: true, issues: [] as string[] } as {
-                    ready: boolean;
-                    issues: string[];
-                    suggestedAction?: string;
-                  }),
-              evaluateSubGoal(
-                plannerModel,
-                goal,
-                subGoal.goal,
-                completedGoalsList,
-                orchestratorDom,
-                thinkingOptions,
-                orchestratorScreenshot,
-                journeyAppGuide
-              ),
-            ]);
-
-            // Apply readiness result
-            if (readiness && !readiness.ready) {
-              ui.stopSpinner();
-              ui.printScreenReadiness(readiness.issues, readiness.suggestedAction);
-              if (readiness.suggestedAction) {
-                effectiveGoal = `${readiness.suggestedAction}, then ${subGoal.goal}`;
-                ui.printOrchestratorRewrite(subGoal.goal, effectiveGoal);
-              }
-              ui.startSpinner('Reconciling plan with device…', 'orchestrator');
-            }
-
-            // Apply evaluation result (only if readiness didn't already rewrite)
-            if (effectiveGoal === subGoal.goal) {
-              if (decision.action === 'skip') {
-                ui.stopSpinner();
-                ui.printOrchestratorSkip(subGoal.goal, decision.reason);
-                executor.markCompleted(decision.reason);
-                subGoalIdx++;
-                continue;
-              }
-              ui.stopSpinner();
-              if (decision.action === 'rewrite' && decision.rewrittenGoal) {
-                ui.printOrchestratorRewrite(subGoal.goal, decision.rewrittenGoal);
-                effectiveGoal = decision.rewrittenGoal;
-              } else {
-                ui.printOrchestratorProceed(subGoal.goal);
-              }
-            }
-          } catch (err) {
-            // Orchestrator failed — proceed with original goal
-            ui.stopSpinner();
-            ui.printWarning(`Orchestrator check failed: ${err}`);
-          }
-          ui.stopSpinner();
-        }
-
-        if (planResult.isComplex) {
-          ui.printPlanContext(goal, effectiveGoal, executor.all, subGoalIdx);
-        }
-
-        // Build enriched goal with plan context so the LLM doesn't undo progress
-        let enrichedGoal = effectiveGoal;
-        if (planResult.isComplex) {
-          const completedGoals = executor.all
-            .filter((sg) => sg.status === 'completed')
-            .map((sg) => `✓ ${sg.goal} (${sg.result})`)
-            .join('\n');
-          const remainingGoals = executor.all
-            .filter((sg) => sg.status === 'pending' && sg.index !== subGoal.index)
-            .map((sg) => `○ ${sg.goal}`)
-            .join('\n');
-
-          if (completedGoals) {
-            enrichedGoal += `\n\nCONTEXT — Overall goal: "${goal}"\nAlready completed:\n${completedGoals}`;
-            if (remainingGoals) {
-              enrichedGoal += `\nStill pending (handled separately — NOT your job):\n${remainingGoals}`;
-            }
-            enrichedGoal += `\n\nIMPORTANT:`;
-            enrichedGoal += `\n- Previous sub-goals are DONE. Do NOT navigate backwards or undo their work.`;
-            enrichedGoal += `\n- ONLY perform actions for YOUR current sub-goal: "${effectiveGoal}". Do NOT perform actions for pending sub-goals — they will be handled separately after you call "done".`;
-            enrichedGoal += `\n- Once YOUR sub-goal is achieved, call "done" IMMEDIATELY. Do NOT continue to the next step.`;
-          }
-        }
-
-        // Track the actual goal being executed so reconciliation uses the rewritten goal, not the original
-        subGoal.executedAs = effectiveGoal;
-
-        // ── App-ID propagation (Fix B) ────────────────────
-        // If we still don't know the target app, try to extract it from the
-        // current sub-goal text. The planner often produces a sub-goal like
-        // "Launch the YouTube app" even when the user's original goal didn't
-        // contain "open|launch|start". Resolving here means every subsequent
-        // sub-goal can stamp recorder entries with a real appId.
-        if (!journeyAppId) {
-          const { extractAppIdFromText } = await import('@appclaw/core/memory/fingerprint');
-          journeyAppId =
-            extractAppIdFromText(effectiveGoal) ||
-            (() => {
-              const m = effectiveGoal.match(
-                /(?:open|launch|start|use|in)\s+(?:the\s+)?(\w[\w\s]*?)(?:\s+app|\s+and\b|$)/i
-              );
-              return m ? (appResolver.resolve(m[1].trim()) ?? undefined) : undefined;
-            })();
-        }
-
-        emitJson({
-          event: 'goal_start',
-          data: {
-            goal: effectiveGoal,
-            subGoalIndex: subGoalIdx,
-            totalSubGoals: executor.all.length,
-          },
-        });
-
-        const result = await runAgent({
-          goal: enrichedGoal,
-          displayGoal: effectiveGoal,
-          mcp: agentScopedMcp,
-          llm,
-          appResolver,
-          appId: journeyAppId,
-          maxSteps: stepsPerGoal,
-          stepDelay: config.STEP_DELAY,
-          maxElements: config.MAX_ELEMENTS,
-          visionMode: config.VISION_MODE,
-          recorder,
-          modelName,
-          onStep: (event) => {
-            logger.logStep({
-              step: event.step,
-              action: event.decision.toolName,
-              decision: event.decision,
-              result: event.result.message,
-              screenHash: '',
-            });
-            emitJson({
-              event: 'step',
-              data: {
-                step: event.step,
-                action: event.decision.toolName,
-                target: event.decision.args?.element as string | undefined,
-                args: event.decision.args,
-                success: event.result.success,
-                message: event.result.message,
-              },
-            });
-            // Stream device screenshot after each step
-            if (event.screenshot) {
-              emitJson({
-                event: 'screen',
-                data: { screenshot: event.screenshot, elementCount: event.elementsCount },
-              });
-            }
-          },
-          // Screen evaluator: checks for unexpected states mid-execution
-          screenEvaluator: planResult.isComplex
-            ? (dom, currentGoal, _step) =>
-                evaluateScreen(plannerModel, currentGoal, dom, thinkingOptions)
-            : undefined,
-        });
-
-        totalSteps += result.stepsUsed;
-        allHistory.push(...result.history);
-        {
-          // Trim each sub-goal's history to its successful final attempt before
-          // appending to the export history. Must happen per-sub-goal: a flat
-          // concatenation would misidentify each sub-goal's accepted `done` as a
-          // "non-last rejected done" and drop everything before it.
-          const { keepOnlyFinalAttempt } = await import('@appclaw/core/sdk/goal-export');
-          exportHistory.push(...keepOnlyFinalAttempt(result.history));
-        }
-        if (result.totalTokens) {
-          journeyInputTokens += result.totalTokens.input;
-          journeyOutputTokens += result.totalTokens.output;
-          journeyCost += result.totalTokens.cost;
-        }
-
-        // After each sub-goal, harvest the appId from any launch_app call or
-        // from a com.X.Y pattern in step results / final reason. This lets the
-        // very first sub-goal ("Launch the YouTube app") establish the app for
-        // every sub-goal that follows.
-        if (!journeyAppId) {
-          const { extractAppIdFromText } = await import('@appclaw/core/memory/fingerprint');
-          for (const step of result.history) {
-            const launchAppId = step.decision?.args?.appId;
-            if (
-              step.decision?.toolName === 'launch_app' &&
-              typeof launchAppId === 'string' &&
-              launchAppId
-            ) {
-              journeyAppId = launchAppId;
-              break;
-            }
-            const fromResult = extractAppIdFromText(step.result ?? '');
-            if (fromResult) {
-              journeyAppId = fromResult;
-              break;
-            }
-          }
-          if (!journeyAppId) {
-            journeyAppId = extractAppIdFromText(result.reason ?? '') ?? journeyAppId;
-          }
-        }
-
-        emitJson({
-          event: 'goal_done',
-          data: {
-            goal: effectiveGoal,
-            success: result.success,
-            reason: result.reason,
-            stepsUsed: result.stepsUsed,
-          },
-        });
-
-        if (result.success) {
-          executor.markCompleted(result.reason);
-        } else {
-          executor.markFailed(result.reason);
-          // Stop on failure for dependent sub-goals
-          const nextGoal = executor.current;
-          if (nextGoal?.dependsOn === subGoalIdx) {
-            ui.printError('Dependent sub-goal cannot proceed', `Sub-goal ${subGoalIdx + 1} failed`);
-            break;
-          }
-        }
-        subGoalIdx++;
-      }
-
-      // ── Final journey summary (rendered while Ink is still mounted) ──
-      allDone = executor.all.every((sg) => sg.status === 'completed');
-      ui.printJourneySummary({
-        success: allDone,
-        overallGoal: goal,
-        subGoals: executor.all.map((sg) => ({
-          goal: sg.goal,
-          status: sg.status,
-          result: sg.result,
-        })),
-        totalSteps,
-        durationMs: Date.now() - journeyStart,
-        tokens: {
-          input: journeyInputTokens,
-          output: journeyOutputTokens,
-          cost: journeyCost,
-          model: modelName,
+      outcome = await runGoalSession(goal, {
+        config,
+        mcp: agentScopedMcp,
+        llm,
+        appResolver,
+        modelName,
+        logger,
+        recorder,
+        onPlanned: ({ subGoals }) => {
+          if (!useInk) return;
+          activateInk({
+            overallGoal: goal,
+            subGoalTotal: subGoals.length,
+            model: modelName,
+            mode: config.AGENT_MODE,
+            // Per-step rows are debug-only; default view shows sub-goals + outcomes.
+            // Gated by APPCLAW_DEBUG (MCP_DEBUG only adds the MCP traffic lane).
+            showSteps: process.env.APPCLAW_DEBUG === '1' || process.env.APPCLAW_DEBUG === 'true',
+          });
         },
       });
     } finally {
       if (useInk) await deactivateInk();
     }
+
+    const { success: allDone, totalSteps, tokens: journeyTokens } = outcome;
+    const journeyCost = journeyTokens.cost;
+    const allHistory = outcome.history;
 
     emitJson({
       event: 'done',
@@ -1460,30 +1181,15 @@ async function main() {
     // ─── Export goal trajectory as a replayable SDK vitest spec ───
     if (cliArgs.exportPath !== null) {
       try {
-        const { generateSdkTest } = await import('@appclaw/core/sdk/goal-export');
-        const fsp = await import('fs/promises');
-        const pathMod = await import('path');
-        const exportDir = cliArgs.exportDir ?? config.EXPORT_DIR;
-        const targetPath = resolveExportPath(cliArgs.exportPath, exportDir, goal);
-        const source = generateSdkTest({
+        const targetPath = await writeGoalExport({
           goal,
-          result: {
-            success: allDone,
-            reason: allDone ? 'All sub-goals completed' : 'Some sub-goals failed',
-            stepsUsed: totalSteps,
-            // Use exportHistory (per-sub-goal trimmed) — this is what makes the
-            // exported test capture only the successful path, not the recovery
-            // dance the agent did when verification rejected an early `done`.
-            history: exportHistory,
-          },
-          config: {
-            provider: config.LLM_PROVIDER,
-            platform: resolvedPlatform,
-            agentMode: config.AGENT_MODE,
-          },
+          outcome,
+          cliPath: cliArgs.exportPath,
+          dir: cliArgs.exportDir ?? config.EXPORT_DIR,
+          provider: config.LLM_PROVIDER,
+          platform: resolvedPlatform,
+          agentMode: config.AGENT_MODE,
         });
-        await fsp.mkdir(pathMod.dirname(pathMod.resolve(targetPath)), { recursive: true });
-        await fsp.writeFile(targetPath, source, 'utf8');
         ui.printInfo(`Exported replay test → ${targetPath}`);
         emitJson({ event: 'export', data: { path: targetPath } });
       } catch (err: any) {

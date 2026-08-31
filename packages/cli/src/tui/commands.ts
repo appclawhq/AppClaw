@@ -19,7 +19,7 @@ import { tryParseNaturalFlowLine } from '@appclaw/core/flow/natural-line';
 
 import { COLORS } from '../ui/ink/theme.js';
 
-import { tuiStore, getSnapshot, type Platform, type DeviceSummary } from './store.js';
+import { tuiStore, getSnapshot, type Platform, type DeviceSummary, type TuiMode } from './store.js';
 import {
   buildYamlString,
   buildSdkTestString,
@@ -42,15 +42,26 @@ export interface TuiActions {
   goToHistory(): void;
   goToMain(): void;
   saveSettings(): Promise<void>;
-  /** `/stream` — mirror the device in the main screen's right-hand panel. */
+  /** `/stream` — mirror the device in the side panel, or resume a paused one. */
   openStream(): Promise<void>;
-  /** `/stream-close` — stop the mirror. */
+  /** `/stream-pause` — hold the last frame and stop capturing. */
+  pauseStream(): void;
+  /** `/stream-close` — tear the mirror down. */
   closeStream(): void;
   runDoctor(): Promise<void>;
   /** One deterministic step, executed on device and recorded — the default for a plain line. */
   runInstruction(instruction: string): Promise<void>;
   /** Full autonomous agent loop (`/goal`) — nothing is recorded. */
   runGoal(goal: string): Promise<void>;
+  /** Ask the running goal to stop. Cooperative: it lands at the next step boundary. */
+  stopRun(): void;
+  /**
+   * `/export` in goal mode — write the last goal run out as a replayable
+   * `@appclaw/runner` spec. An action rather than a plain command because the
+   * spec needs the session's provider, platform and agent mode, none of which
+   * this module can see.
+   */
+  exportGoal(cliPath: string): Promise<void>;
   quit(): Promise<void>;
 }
 
@@ -60,7 +71,20 @@ export interface PaletteCommand {
   name: string;
   aliases?: string[];
   summary: string;
+  /**
+   * Modes this command is listed and matched in. Omit for the ones that apply
+   * everywhere (device, settings, history, stream, help, quit…). The recorder
+   * commands are scoped to `record` because in goal mode there is no step list
+   * for them to act on, and a palette full of dead entries is worse than a
+   * short one.
+   */
+  modes?: TuiMode[];
   run(actions: TuiActions, args: string): void | Promise<void>;
+}
+
+/** Commands available in `mode` — the palette, tab-completion and dispatch all use this. */
+export function commandsFor(mode: TuiMode): PaletteCommand[] {
+  return COMMANDS.filter((c) => !c.modes || c.modes.includes(mode));
 }
 
 /** Shared guard for the commands that need at least one recorded step. */
@@ -85,9 +109,21 @@ export const COMMANDS: PaletteCommand[] = [
   {
     id: 'goal',
     name: '/goal',
-    summary: 'Run the autonomous agent loop for a goal (not recorded)',
+    summary: 'Run the autonomous agent for a goal (not recorded)',
     run: async (actions, args) => {
       if (!args.trim()) {
+        // No argument is a mode switch, not an error: in goal mode a plain line
+        // already is the goal, so "/goal" on its own can only mean "put me in
+        // the mode where that's true".
+        if (getSnapshot().mode !== 'goal') {
+          tuiStore.setMode('goal');
+          tuiStore.log(
+            'info',
+            'Goal mode',
+            'A plain line now runs the agent. /mode record to go back.'
+          );
+          return;
+        }
         tuiStore.setPaletteError('Usage: /goal <what you want the agent to achieve>');
         return;
       }
@@ -95,7 +131,53 @@ export const COMMANDS: PaletteCommand[] = [
     },
   },
   {
+    id: 'mode',
+    name: '/mode',
+    summary: 'Switch between goal and step-recording mode',
+    run: (_actions, args) => {
+      const want = args.trim().toLowerCase();
+      const current = getSnapshot().mode;
+      if (!want) {
+        tuiStore.log(
+          'info',
+          `Mode: ${current}`,
+          current === 'goal'
+            ? 'A plain line runs the agent. /mode record to record steps instead.'
+            : 'A plain line records one step. /mode goal to run the agent instead.'
+        );
+        return;
+      }
+      if (want !== 'goal' && want !== 'record') {
+        tuiStore.setPaletteError('Usage: /mode goal | /mode record');
+        return;
+      }
+      if (want === current) {
+        tuiStore.log('info', `Already in ${current} mode`);
+        return;
+      }
+      tuiStore.setMode(want);
+      tuiStore.log(
+        'info',
+        want === 'goal' ? 'Goal mode' : 'Recording mode',
+        want === 'goal'
+          ? 'A plain line runs the agent through the full planner.'
+          : 'A plain line runs one deterministic step and records it.'
+      );
+    },
+  },
+  {
+    id: 'record',
+    name: '/record',
+    summary: 'Switch to step-recording mode',
+    modes: ['goal'],
+    run: (actions, _args) => {
+      const cmd = COMMANDS.find((c) => c.id === 'mode')!;
+      return cmd.run(actions, 'record');
+    },
+  },
+  {
     id: 'list',
+    modes: ['record'],
     name: '/list',
     summary: 'List all recorded steps',
     run: () => {
@@ -116,6 +198,7 @@ export const COMMANDS: PaletteCommand[] = [
   },
   {
     id: 'yaml',
+    modes: ['record'],
     name: '/yaml',
     summary: 'Preview the YAML flow output',
     run: () => {
@@ -131,6 +214,7 @@ export const COMMANDS: PaletteCommand[] = [
   },
   {
     id: 'preview',
+    modes: ['record'],
     name: '/preview',
     summary: 'Preview the generated code without saving (filename picks the format)',
     run: (_actions, args) => {
@@ -150,8 +234,12 @@ export const COMMANDS: PaletteCommand[] = [
   {
     id: 'export',
     name: '/export',
-    summary: 'Export steps as an @appclaw/runner spec (.spec.ts) or YAML flow (.yaml)',
-    run: (_actions, args) => {
+    summary: 'Save what just happened as a replayable test',
+    run: (actions, args) => {
+      // Both modes export, from different material: the recorded step list in
+      // record mode, the last agent run in goal mode. One command because it
+      // answers the same question in both — "make what I just did repeatable".
+      if (getSnapshot().mode === 'goal') return actions.exportGoal(args.trim());
       if (!requireSteps('export')) return;
       const { steps, meta, exportDir } = getSnapshot();
       const filename = args.trim() || `flow-${Date.now()}.spec.ts`;
@@ -195,6 +283,7 @@ export const COMMANDS: PaletteCommand[] = [
   },
   {
     id: 'undo',
+    modes: ['record'],
     name: '/undo',
     summary: 'Remove the last recorded step',
     run: () => {
@@ -212,6 +301,7 @@ export const COMMANDS: PaletteCommand[] = [
   },
   {
     id: 'edit',
+    modes: ['record'],
     name: '/edit',
     summary: 'Replace a step by number (e.g. /edit 3 tap "Settings")',
     run: (_actions, args) => {
@@ -236,6 +326,7 @@ export const COMMANDS: PaletteCommand[] = [
   },
   {
     id: 'insert',
+    modes: ['record'],
     name: '/insert',
     summary: 'Insert a step at a position (e.g. /insert 2 wait 3 s)',
     run: (_actions, args) => {
@@ -261,6 +352,7 @@ export const COMMANDS: PaletteCommand[] = [
   },
   {
     id: 'delete',
+    modes: ['record'],
     name: '/delete',
     summary: 'Delete a step by number (e.g. /delete 3)',
     run: (_actions, args) => {
@@ -276,6 +368,7 @@ export const COMMANDS: PaletteCommand[] = [
   },
   {
     id: 'meta',
+    modes: ['record'],
     name: '/meta',
     summary: 'Set flow metadata (/meta appId com.foo, /meta name Login, /meta platform ios)',
     run: (_actions, args) => {
@@ -317,6 +410,7 @@ export const COMMANDS: PaletteCommand[] = [
   },
   {
     id: 'clear',
+    modes: ['record'],
     name: '/clear',
     summary: 'Clear all recorded steps and metadata',
     run: () => {
@@ -379,13 +473,19 @@ export const COMMANDS: PaletteCommand[] = [
   {
     id: 'stream',
     name: '/stream',
-    summary: 'Mirror the device screen in the side panel (keeps typing live)',
+    summary: 'Mirror the device screen in the side panel, or resume a paused one',
     run: (actions) => actions.openStream(),
+  },
+  {
+    id: 'stream-pause',
+    name: '/stream-pause',
+    summary: 'Freeze the mirror on its last frame (^p toggles)',
+    run: (actions) => actions.pauseStream(),
   },
   {
     id: 'stream-close',
     name: '/stream-close',
-    summary: 'Stop the device mirror',
+    summary: 'Tear the device mirror down',
     run: (actions) => actions.closeStream(),
   },
   {
@@ -417,11 +517,16 @@ export const COMMANDS: PaletteCommand[] = [
       // The scrollable modal, not the transcript: the full list is longer than
       // the transcript pane is tall, so logging it there overflowed the pane's
       // height budget and pushed the status bar off screen.
-      const width = COMMANDS.reduce((w, c) => Math.max(w, c.name.length), 0);
+      const mode = getSnapshot().mode;
+      const available = commandsFor(mode);
+      const width = available.reduce((w, c) => Math.max(w, c.name.length), 0);
       tuiStore.showViewer({
         title: 'Commands',
-        subtitle: 'type a plain line to record a step · /goal to run the agent',
-        lines: COMMANDS.map((c) => `${c.name.padEnd(width + 2)}${c.summary}`),
+        subtitle:
+          mode === 'goal'
+            ? 'type a plain line to run it as a goal · /mode record to record steps'
+            : 'type a plain line to record a step · /goal to run the agent',
+        lines: available.map((c) => `${c.name.padEnd(width + 2)}${c.summary}`),
       });
     },
   },
@@ -453,11 +558,15 @@ export async function requestQuit(actions: TuiActions): Promise<void> {
   await actions.quit();
 }
 
-/** Case-insensitive prefix match against name + aliases, for the palette list. */
+/**
+ * Case-insensitive prefix match against name + aliases, for the palette list.
+ * Scoped to the active mode so the list only offers commands that can act.
+ */
 export function matchCommands(query: string): PaletteCommand[] {
+  const available = commandsFor(getSnapshot().mode);
   const q = query.trim().toLowerCase();
-  if (!q || q === '/') return COMMANDS;
-  return COMMANDS.filter(
+  if (!q || q === '/') return available;
+  return available.filter(
     (c) =>
       c.name.toLowerCase().startsWith(q) || c.aliases?.some((a) => a.toLowerCase().startsWith(q))
   );
@@ -483,7 +592,7 @@ export function completeCommand(line: string): string | null {
   // "/settings", replacing the prefix rather than extending it.
   const q = line.toLowerCase();
   const candidates: string[] = [];
-  for (const command of COMMANDS) {
+  for (const command of commandsFor(getSnapshot().mode)) {
     if (command.name.toLowerCase().startsWith(q)) candidates.push(command.name);
     for (const alias of command.aliases ?? []) {
       if (alias.toLowerCase().startsWith(q)) candidates.push(alias);
@@ -506,6 +615,8 @@ export function completeCommand(line: string): string | null {
 export function resolveCommand(line: string): PaletteCommand | undefined {
   const head = line.trim().split(/\s+/, 1)[0]?.toLowerCase();
   if (!head) return undefined;
+  // Resolved against every command, not just the current mode's: typing a
+  // recorder command in goal mode should say what's wrong, not "unknown".
   return COMMANDS.find(
     (c) => c.name.toLowerCase() === head || c.aliases?.some((a) => a.toLowerCase() === head)
   );
@@ -513,8 +624,10 @@ export function resolveCommand(line: string): PaletteCommand | undefined {
 
 /**
  * Execute one submitted line from the main screen's instruction box.
+ *
  * A leading "/" dispatches to the matching palette command; anything else is
- * one natural-language instruction, executed on device and recorded.
+ * the mode's default verb — one recorded instruction in `record` mode, one
+ * autonomous agent run in `goal` mode.
  */
 export async function executeLine(line: string, actions: TuiActions): Promise<void> {
   const trimmed = line.trim();
@@ -540,6 +653,13 @@ export async function executeLine(line: string, actions: TuiActions): Promise<vo
       tuiStore.setPaletteError(`Unknown command: ${trimmed} — try /help`);
       return;
     }
+    const mode = getSnapshot().mode;
+    if (cmd.modes && !cmd.modes.includes(mode)) {
+      tuiStore.setPaletteError(
+        `${cmd.name} needs ${cmd.modes.join('/')} mode — you're in ${mode}. Try /mode ${cmd.modes[0]}`
+      );
+      return;
+    }
     // Slice off what the user actually typed (alias or prefix), not the
     // canonical name — their lengths can differ.
     const args = trimmed.slice(head.length).trim();
@@ -547,5 +667,9 @@ export async function executeLine(line: string, actions: TuiActions): Promise<vo
     return;
   }
 
+  if (getSnapshot().mode === 'goal') {
+    await actions.runGoal(trimmed);
+    return;
+  }
   await actions.runInstruction(trimmed);
 }

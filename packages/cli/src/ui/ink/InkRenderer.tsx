@@ -238,6 +238,45 @@ export function shouldUseInk(): boolean {
   return Boolean(process.stdout.isTTY && process.stdin.isTTY);
 }
 
+/**
+ * Register the agent-loop renderer WITHOUT mounting Ink, for a host that is
+ * already rendering (Terminal Studio's goal mode).
+ *
+ * Two Ink apps cannot share stdout — the second `render()` fights the first for
+ * the same lines and for stdin's raw mode. So the host mounts `<RunScreen/>` as
+ * one of its own screens and borrows only the renderer seam through here.
+ *
+ * `fullscreen` is left on by default because the host owns the alternate screen
+ * already: the fallback branch of RunScreen renders through Ink's `<Static>`,
+ * which writes permanently above the frame and would smear the host's UI.
+ *
+ * Returns a detach function. It does not restore the previous renderer — the
+ * host holds that and re-registers it, since only the host knows what it was.
+ */
+export function attachRunRenderer(ctx?: {
+  overallGoal?: string;
+  subGoalTotal?: number;
+  model?: string;
+  mode?: string;
+  showSteps?: boolean;
+  fullscreen?: boolean;
+}): () => void {
+  store.reset();
+  if (ctx) {
+    const { showSteps, fullscreen, ...runCtx } = ctx;
+    store.setRunContext(runCtx);
+    if (showSteps !== undefined) store.setShowSteps(showSteps);
+    store.setFullscreen(fullscreen ?? true);
+  } else {
+    store.setFullscreen(true);
+  }
+  setRenderer(inkRenderer);
+  setHitlHandler((request) => askUserViaInk(request as HITLRequest));
+  return () => {
+    setHitlHandler(null);
+  };
+}
+
 /** Mount the Ink agent-loop UI and register it as the active renderer. */
 export function activateInk(ctx?: {
   overallGoal?: string;

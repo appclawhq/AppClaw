@@ -8,9 +8,31 @@
  */
 
 import type { FlowStep, FlowMeta } from '@appclaw/core/flow/types';
+import type { SetupIssue } from './setup-check.js';
 import type { Language } from './highlight.js';
 
-export type TuiScreen = 'welcome' | 'device-picker' | 'main' | 'settings' | 'history';
+export type TuiScreen =
+  | 'welcome'
+  | 'device-picker'
+  | 'main'
+  | 'settings'
+  | 'history'
+  | 'run'
+  | 'setup';
+
+/**
+ * What a plain (non-slash) line means.
+ *
+ * `record` — one deterministic instruction, executed and appended to `steps`.
+ *   This is what `appclaw --tui` opens in: the shell is a step recorder.
+ * `goal` — one autonomous agent run through the full planner. This is what
+ *   bare `appclaw` opens in, replacing the old readline goal prompt.
+ *
+ * The two are the same shell with the same device session, palette and history;
+ * only the default verb and the relevant subset of commands differ. `/mode`
+ * switches between them without dropping the session.
+ */
+export type TuiMode = 'record' | 'goal';
 
 export type Platform = 'android' | 'ios';
 
@@ -34,7 +56,12 @@ export interface TranscriptEntry {
   ts: number;
 }
 
-export type StreamStatus = 'idle' | 'starting' | 'running' | 'error';
+/**
+ * `paused` is distinct from `idle`: the loop, its temp dir and any transmitted
+ * kitty image are all still alive, and the last frame is still on screen. Only
+ * capturing has stopped.
+ */
+export type StreamStatus = 'idle' | 'starting' | 'running' | 'paused' | 'error';
 
 /** `/stream` — the device mirror shown in the main screen's right-hand panel. */
 export interface StreamState {
@@ -82,6 +109,35 @@ export interface RunSummary {
 
 export interface TuiState {
   screen: TuiScreen;
+  mode: TuiMode;
+  /**
+   * `appclaw "goal"` — run the goal it was given, then exit with a status code
+   * instead of staying resident. Scripts that pass a goal on the command line
+   * expect the process to terminate, so the shell must not park on a prompt.
+   */
+  oneShot: boolean;
+  /** The goal currently on the `run` screen — shown in its status bar. */
+  runningGoal: string;
+  /**
+   * A one-shot run has finished and the screen is being held so its summary can
+   * be read; the next keypress exits. Leaving the alternate screen erases the
+   * frame, so exiting on a timer took the result away while it was still being
+   * looked at. Carries the exit code the keypress should quit with.
+   */
+  awaitingExit: { code: number } | null;
+  /**
+   * A stop has been asked for and the agent has not returned yet. Cancellation
+   * is cooperative — the loop checks between steps — so this can be up on
+   * screen for a few seconds, and the run screen says "stopping…" rather than
+   * pretending the keypress took effect immediately.
+   */
+  stopping: boolean;
+  /**
+   * Config problems that make a run impossible (no API key, …). Non-empty means
+   * the shell opens on SetupScreen instead of the platform picker, and the
+   * settings screen returns there rather than to main until they are resolved.
+   */
+  setupIssues: SetupIssue[];
   platform: Platform | null;
   device: DeviceSummary | null;
   devices: DeviceSummary[];
@@ -115,7 +171,13 @@ export interface TuiState {
 
   stream: StreamState;
 
-  settingsFields: Array<{ key: string; value: string; description?: string }>;
+  settingsFields: Array<{
+    key: string;
+    value: string;
+    description?: string;
+    /** Rendered as dots in the list — an API key should not sit on screen. */
+    secret?: boolean;
+  }>;
   settingsLoading: boolean;
   settingsDirty: boolean;
   settingsSaved: boolean;
@@ -161,6 +223,12 @@ export interface TuiState {
 function initial(): TuiState {
   return {
     screen: 'welcome',
+    mode: 'record',
+    oneShot: false,
+    runningGoal: '',
+    awaitingExit: null,
+    stopping: false,
+    setupIssues: [],
     platform: null,
     device: null,
     devices: [],
@@ -237,6 +305,30 @@ export const tuiStore = {
 
   goTo(screen: TuiScreen): void {
     set({ screen });
+  },
+
+  setMode(mode: TuiMode): void {
+    set({ mode });
+  },
+
+  setOneShot(oneShot: boolean): void {
+    set({ oneShot });
+  },
+
+  setRunningGoal(runningGoal: string): void {
+    set({ runningGoal });
+  },
+
+  setAwaitingExit(awaitingExit: { code: number } | null): void {
+    set({ awaitingExit });
+  },
+
+  setStopping(stopping: boolean): void {
+    set({ stopping });
+  },
+
+  setSetupIssues(setupIssues: SetupIssue[]): void {
+    set({ setupIssues });
   },
 
   setPlatform(platform: Platform): void {

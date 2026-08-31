@@ -11,6 +11,7 @@ import { FinalSummary } from './components/FinalSummary.js';
 import { PlanChecklist } from './components/PlanChecklist.js';
 import { OrbitalSpinner } from './components/OrbitalSpinner.js';
 import { HitlPrompt } from './components/HitlPrompt.js';
+import { RunWidthContext } from './width.js';
 
 const STREAM_MAX_LINES = 5;
 const STREAM_WIDTH = 72;
@@ -171,10 +172,22 @@ function LiveRegion({ state, showSteps }: { state: UIState; showSteps: boolean }
  * footer. Without `rows` (tests/headless) it falls back to a plain top-down
  * render so every entry is captured.
  */
-export function RunScreen() {
+export interface RunScreenProps {
+  /**
+   * Rows and columns the run may use. Both default to the terminal's, which is
+   * right for the one-shot CLI where the run owns the screen. Terminal Studio
+   * passes a column instead: there the run shares the frame with the device
+   * stream, and a footer sized to the whole terminal would wrap and cost the
+   * layout the row FOOTER_H promised it wouldn't.
+   */
+  rows?: number;
+  width?: number;
+}
+
+export function RunScreen({ rows: rowsProp, width: widthProp }: RunScreenProps = {}) {
   const state = useSyncExternalStore(subscribe, getSnapshot);
   const { stdout } = useStdout();
-  const rows = stdout?.rows ?? 0;
+  const rows = rowsProp ?? stdout?.rows ?? 0;
   const {
     maxSteps,
     currentStep,
@@ -206,33 +219,41 @@ export function RunScreen() {
   ) : null;
 
   // ── Fullscreen: pinned checklist (top) + scrolling viewport + footer ──
+  //
+  // Everything below is wrapped in RunWidthContext so the boxes inside size to
+  // the pane rather than the terminal — the two are the same thing only when
+  // the run owns the screen, which it does not in Terminal Studio.
   if (fullscreen && rows > 0) {
     const footerH = showFooter ? FOOTER_H : 0;
     const checklistH = liveChecklist ? planGoals.length + 2 : 0;
     const contentH = Math.max(3, rows - footerH - checklistH);
     const slice = tailSlice(visible, contentH - 4); // reserve room for the live region
     return (
-      <Box flexDirection="column" height={rows}>
-        {liveChecklist}
-        <Box flexDirection="column" flexGrow={1} overflow="hidden">
-          {slice.map(renderEntry)}
-          <LiveRegion state={state} showSteps={showSteps} />
+      <RunWidthContext.Provider value={widthProp ?? null}>
+        <Box flexDirection="column" height={rows}>
+          {liveChecklist}
+          <Box flexDirection="column" flexGrow={1} overflow="hidden">
+            {slice.map(renderEntry)}
+            <LiveRegion state={state} showSteps={showSteps} />
+          </Box>
+          {footer}
         </Box>
-        {footer}
-      </Box>
+      </RunWidthContext.Provider>
     );
   }
 
   // ── Fallback: plain top-down render (headless / tests) ──
   return (
-    <Box flexDirection="column">
-      <Static items={visible}>{(entry) => renderEntry(entry)}</Static>
+    <RunWidthContext.Provider value={widthProp ?? null}>
       <Box flexDirection="column">
-        {liveChecklist}
-        <LiveRegion state={state} showSteps={showSteps} />
-        {footer}
+        <Static items={visible}>{(entry) => renderEntry(entry)}</Static>
+        <Box flexDirection="column">
+          {liveChecklist}
+          <LiveRegion state={state} showSteps={showSteps} />
+          {footer}
+        </Box>
       </Box>
-    </Box>
+    </RunWidthContext.Provider>
   );
 }
 

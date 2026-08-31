@@ -65,6 +65,19 @@ export function SettingsScreen({ actions }: SettingsScreenProps) {
     { isActive: editing }
   );
 
+  /**
+   * What a field shows when it is not being edited. A secret is masked: the
+   * settings screen is the one place an API key would otherwise sit on screen
+   * for as long as the shell is open, and over a shared screen or a recording
+   * that is a leak for no benefit — the last four characters are enough to tell
+   * which key is set.
+   */
+  function display(f: (typeof ui.settingsFields)[number]): string {
+    if (!f.value) return '(unset)';
+    if (!f.secret) return f.value;
+    return f.value.length <= 4 ? '••••' : `${'•'.repeat(8)}${f.value.slice(-4)}`;
+  }
+
   function commit(value: string): void {
     const field = ui.settingsFields[index];
     if (field) tuiStore.updateSettingField(field.key, value);
@@ -93,7 +106,7 @@ export function SettingsScreen({ actions }: SettingsScreenProps) {
                   {i === index && editing ? (
                     <TextInput value={draft} onChange={setDraft} onSubmit={commit} />
                   ) : (
-                    <Text color={COLORS.step}>{f.value || '(unset)'}</Text>
+                    <Text color={COLORS.step}>{display(f)}</Text>
                   )}
                 </Text>
                 {f.description && i === index ? (

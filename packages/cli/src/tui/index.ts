@@ -8,32 +8,28 @@
  * (`/stream` shows frames in the main screen's right-hand panel), and the two
  * execution modes below.
  *
- * Execution modes: a plain line is ONE deterministic instruction
- * (`runInstruction` → runOneInstruction) that gets recorded into
- * `store.steps` — the TUI is a step recorder, and
- * `/list`, `/yaml`, `/export`… operate on that list. `/goal` opts into the
- * autonomous agent loop instead.
+ * Modes: the shell opens in `record` for `appclaw --tui` and in `goal` for
+ * bare `appclaw`. Same session, same palette, same history — only what a plain
+ * line means differs, and `/mode` switches without dropping the device. A goal
+ * takes over the screen with RunScreen (the same agent-loop UI the one-shot CLI
+ * renders) and runs the full planner path via `runGoalSession`.
  *
- * Scope note: `/goal` calls `runAgent` directly (one flat agent loop per
- * submitted goal) rather than the CLI's full multi-sub-goal
- * planner/orchestrator (decomposeGoal + screen-readiness reconciliation) —
- * that keeps this surface simple for iterative, REPL-style use. For a single
- * complex multi-step goal, `appclaw "goal"` outside the TUI still applies
- * the full planner.
+ * In `record`, a plain line is ONE deterministic instruction (`runInstruction`
+ * → runOneInstruction) appended to `store.steps`; `/list`, `/yaml`, `/export`…
+ * operate on that list. In `goal`, a plain line is what `/goal` does.
  */
 
 import React from 'react';
 import { render } from 'ink';
 import { existsSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { basename, relative, resolve } from 'node:path';
 
-import { refreshConfig, Config, type AppClawConfig } from '@appclaw/core/config';
+import { safeRefreshConfig, Config, type AppClawConfig } from '@appclaw/core/config';
 import { createMCPClient } from '@appclaw/core/mcp/client';
 import { createLLMProvider } from '@appclaw/core/llm/provider';
 import { setupDevice } from '@appclaw/core/device/index';
 import { AppResolver } from '@appclaw/core/agent/app-resolver';
-import { runAgent } from '@appclaw/core/agent/loop';
 import { tryParseNaturalFlowLine } from '@appclaw/core/flow/natural-line';
 import { runOneInstruction, DEFAULT_MIN_MATCH_SCORE } from '@appclaw/core/flow/run-instruction';
 import { stepAction, stepTarget } from '@appclaw/core/ui/step-printer';
@@ -44,6 +40,10 @@ import { setRenderer, type UIRenderer } from '@appclaw/core/ui/renderer';
 import type { FlowStep } from '@appclaw/core/flow/types';
 
 import { COLORS, symbols } from '../ui/ink/theme.js';
+import { summariseOutcome } from './goal-summary.js';
+import { attachRunRenderer } from '../ui/ink/InkRenderer.js';
+import { runGoalSession, type GoalSessionOutcome } from '../goal-session.js';
+import { writeGoalExport } from '../goal-export-file.js';
 
 import { TuiApp } from './TuiApp.js';
 import {
@@ -53,6 +53,7 @@ import {
   type Platform,
   type DeviceSummary,
   type RunSummary,
+  type TuiMode,
 } from './store.js';
 import {
   createSessionLog,
@@ -63,11 +64,17 @@ import {
 } from './session-log.js';
 import type { TuiActions } from './commands.js';
 import { getDeviceResolution } from './stream/capture.js';
-import { startStreamLoop, stopStreamLoop } from './stream/frame-loop.js';
+import {
+  startStreamLoop,
+  stopStreamLoop,
+  pauseStreamLoop,
+  resumeStreamLoop,
+} from './stream/frame-loop.js';
 import { detectStreamBackend, backendLabel } from './stream/terminal-caps.js';
 import { fetchScreenInfo } from '../step-recorder/screen-info.js';
 import { captureConsoleAsync } from './capture-console.js';
 import { runDoctor } from '../cli/doctor.js';
+import { collectSetupIssues } from './setup-check.js';
 
 export interface RunTuiOptions {
   platform: Platform | null;
@@ -76,6 +83,22 @@ export interface RunTuiOptions {
   deviceName: string | null;
   /** `--export-dir`: default directory for bare-filename `/export` writes. */
   exportDir?: string | null;
+  /** Which verb a plain line means. `record` (--tui) by default. */
+  mode?: TuiMode;
+  /**
+   * A goal supplied on the command line (`appclaw "open settings"`). Runs as
+   * soon as a device is connected, then the shell exits with a status code —
+   * see `TuiState.oneShot`.
+   */
+  goal?: string | null;
+  /** `--export <path>`: write a replayable spec after a one-shot goal. */
+  exportPath?: string | null;
+  /**
+   * `--stream`: open the device mirror as soon as the session is up, instead of
+   * waiting for `/stream`. Required for `appclaw "a goal"`, which runs the goal
+   * on connect and so never gives anyone a prompt to type the command at.
+   */
+  stream?: boolean;
 }
 
 /**
@@ -94,8 +117,11 @@ function exitAltScreen(): void {
 }
 
 /** Config keys the settings screen exposes — a curated subset, not the full schema. */
-const SETTINGS_KEYS: Array<{ key: keyof AppClawConfig; description: string }> = [
+const SETTINGS_KEYS: Array<{ key: keyof AppClawConfig; description: string; secret?: boolean }> = [
   { key: 'LLM_PROVIDER', description: 'anthropic | openai | gemini | groq | ollama' },
+  // Listed so a missing key can be fixed from SetupScreen without leaving the
+  // shell. Masked in the list; the edit field shows what is being typed.
+  { key: 'LLM_API_KEY', description: 'provider API key (not needed for ollama)', secret: true },
   { key: 'LLM_MODEL', description: 'blank = provider default' },
   { key: 'AGENT_MODE', description: 'dom | vision' },
   { key: 'PLATFORM', description: 'android | ios | blank (prompt)' },
@@ -157,9 +183,32 @@ interface DeviceSession {
 }
 
 export async function runTui(opts: RunTuiOptions): Promise<void> {
-  const config = refreshConfig();
+  // Reassigned by saveSettings — editing .env from the settings screen has to
+  // change what the rest of the shell reads, not just what is on disk.
+  //
+  // Safe rather than throwing: a rejected value is reported on SetupScreen and
+  // fixed in /settings, which is the one thing the shell can do that a console
+  // error cannot. `configProblems` non-empty means `config` is holding schema
+  // defaults where the user's values were rejected, so nothing may run until it
+  // is empty — which is exactly what SetupScreen enforces.
+  let { config, issues: configProblems } = safeRefreshConfig();
   tuiStore.reset();
   tuiStore.setExportDir(opts.exportDir ?? null);
+  tuiStore.setMode(opts.mode ?? 'record');
+  tuiStore.setOneShot(!!opts.goal);
+
+  /**
+   * A `appclaw "goal"` goal waiting for a device. Cleared the moment it runs,
+   * so a later device switch (`/device`) doesn't silently re-run it.
+   */
+  let pendingGoal: string | null = opts.goal?.trim() || null;
+
+  /**
+   * `--stream`, still owed. A latch rather than a standing flag: it means
+   * "start the mirror once you connect", so re-picking a device with `/device`
+   * after deliberately closing the stream doesn't silently reopen it.
+   */
+  let pendingStream = !!opts.stream;
 
   const sessionLog = createSessionLog(process.cwd());
   setCurrentSessionLog(sessionLog);
@@ -179,6 +228,19 @@ export async function runTui(opts: RunTuiOptions): Promise<void> {
 
   let session: DeviceSession | null = null;
   let quitting = false;
+  /** Drives the one-shot exit code, and what `--export` writes a spec from. */
+  let lastGoalOutcome: GoalSessionOutcome | null = null;
+  /**
+   * What `lastGoalOutcome` came from. The goal names the spec and titles it;
+   * the platform is captured here rather than read at export time because a
+   * `/device` switch in between would otherwise write an iOS spec for a run
+   * that happened on Android.
+   */
+  let lastRun: { goal: string; platform: Platform } | null = null;
+  /** Set once `--export` has written, so quit() can report the path in scrollback. */
+  let exportedSpecPath: string | null = null;
+  /** Aborts the goal currently running, if any. Cleared when the run returns. */
+  let runAbort: AbortController | null = null;
   /** Generation token so a stale device-list response can't clobber a newer one. */
   let devicesReq = 0;
 
@@ -267,6 +329,25 @@ export async function runTui(opts: RunTuiOptions): Promise<void> {
       sessionLog.setLlm(config.LLM_PROVIDER, modelName, config.AGENT_MODE);
       tuiStore.log('info', `Connected — ${deviceResult.deviceName} (${deviceResult.platform})`);
       tuiStore.goTo('main');
+      // Both latches fire from here rather than from the bootstrap below,
+      // because this is the only place a session comes into existence — whether
+      // the device came from --udid or from the picker, the user answers only
+      // what they have to and the run starts the moment it can.
+      if (pendingStream) {
+        pendingStream = false;
+        // Before the goal, not after: the panel has to be live when the run
+        // screen takes over, and openStream only kicks off the loop — the first
+        // frame arrives on its own tick either way.
+        await actions.openStream();
+      }
+      if (pendingGoal) {
+        const goal = pendingGoal;
+        pendingGoal = null;
+        // Not awaited: connect() is called from selectDevice, which the device
+        // picker awaits before it re-renders. Awaiting a whole agent run here
+        // would freeze the picker on screen for the length of the run.
+        void actions.runGoal(goal);
+      }
     } catch (err) {
       // Don't leak the appium-mcp subprocess spawned before the failure.
       if (mcpClient) {
@@ -336,17 +417,40 @@ export async function runTui(opts: RunTuiOptions): Promise<void> {
     },
 
     goToMain() {
-      tuiStore.goTo('main');
+      // Escaping out of settings with the config still unusable belongs back on
+      // the setup screen, not on a main screen whose every command would fail.
+      tuiStore.goTo(getSnapshot().setupIssues.length > 0 ? 'setup' : 'main');
     },
 
     goToSettings() {
       tuiStore.setSettingsLoading(true);
       tuiStore.goTo('settings');
-      const fields = SETTINGS_KEYS.map(({ key, description }) => ({
+      const rejected = new Map(configProblems.map((i) => [i.key, i]));
+      const fields = SETTINGS_KEYS.map(({ key, description, secret }) => ({
         key: key as string,
-        value: String(Config[key] ?? ''),
+        // A rejected key shows what is actually in `.env`, not the default it
+        // fell back to: the typo is the thing being corrected, and a field
+        // pre-filled with a valid value hides it.
+        value: rejected.has(key as string)
+          ? (process.env[key as string] ?? '')
+          : String(Config[key] ?? ''),
         description,
+        secret,
       }));
+      // Anything SetupScreen is complaining about has to be editable here, or
+      // "press enter to edit it here" is a dead end. Most rejected keys are
+      // already listed; the rest are appended with the values they accept.
+      const listed = new Set(fields.map((f) => f.key));
+      for (const issue of configProblems) {
+        if (!issue.key || listed.has(issue.key)) continue;
+        listed.add(issue.key);
+        fields.push({
+          key: issue.key,
+          value: process.env[issue.key] ?? '',
+          description: issue.options ? issue.options.join(' | ') : 'rejected — see .env',
+          secret: undefined,
+        });
+      }
       tuiStore.setSettingsFields(fields);
     },
 
@@ -368,8 +472,20 @@ export async function runTui(opts: RunTuiOptions): Promise<void> {
         process.env[field.key] = field.value;
       }
       await writeFile(envPath, lines.join('\n'), 'utf-8');
-      refreshConfig();
+      ({ config, issues: configProblems } = safeRefreshConfig());
       tuiStore.markSettingsSaved();
+
+      // The whole point of listing the offending keys here is that saving them
+      // clears the setup screen — re-check rather than making the user restart.
+      if (getSnapshot().setupIssues.length > 0) {
+        const remaining = collectSetupIssues(config, configProblems);
+        tuiStore.setSetupIssues(remaining);
+        if (remaining.length === 0) {
+          tuiStore.log('info', 'Setup complete', 'Pick a device to get going');
+          startAfterSetup();
+          return;
+        }
+      }
       tuiStore.log(
         'info',
         'Settings saved to .env',
@@ -446,9 +562,18 @@ export async function runTui(opts: RunTuiOptions): Promise<void> {
      * device or a headless emulator.
      */
     async openStream() {
-      const { device } = getSnapshot();
+      const { device, stream } = getSnapshot();
       if (!device) {
         tuiStore.log('warn', 'No device selected', '/device');
+        return;
+      }
+      // Resuming is not restarting: the loop, its temp dir and the transmitted
+      // kitty image are all still there, so this skips the resolution
+      // round-trip and the backend detection and just lets ticks capture again.
+      if (stream.status === 'paused') {
+        resumeStreamLoop();
+        tuiStore.setStream({ status: 'running' });
+        tuiStore.log('info', 'Stream resumed');
         return;
       }
       if (device.platform !== 'android') {
@@ -499,7 +624,7 @@ export async function runTui(opts: RunTuiOptions): Promise<void> {
         tuiStore.log(
           'info',
           `Streaming ${device.name} in the side panel (${backendLabel(backend)})`,
-          '/stream-close stops it — the input stays usable meanwhile'
+          '^p holds the frame · ^x stops it — the input stays usable meanwhile'
         );
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -515,7 +640,32 @@ export async function runTui(opts: RunTuiOptions): Promise<void> {
 
     /** Stops the mirror and clears the panel. */
     closeStream() {
+      const { stream } = getSnapshot();
+      if (stream.status === 'idle') {
+        // Bound to a keystroke now, so it is pressed without looking at the
+        // panel — silence would read as a dead key.
+        tuiStore.log('warn', 'No stream to close', '^r starts one');
+        return;
+      }
       resetStream();
+      tuiStore.log('info', 'Stream closed', '^r starts it again');
+    },
+
+    pauseStream() {
+      const { stream } = getSnapshot();
+      if (stream.status !== 'running') {
+        tuiStore.log(
+          'warn',
+          stream.status === 'paused' ? 'Stream is already paused' : 'No stream to pause',
+          stream.status === 'paused' ? '^p resumes it' : '^r starts one'
+        );
+        return;
+      }
+      pauseStreamLoop();
+      // Only the status changes: frameLines, backend and resolution all stay, so
+      // the last frame keeps rendering and a resume needs no setup at all.
+      tuiStore.setStream({ status: 'paused' });
+      tuiStore.log('info', 'Stream paused', '^p resumes · ^x stops it');
     },
 
     async runDoctor() {
@@ -650,50 +800,187 @@ export async function runTui(opts: RunTuiOptions): Promise<void> {
       }
       const active = session;
       tuiStore.log('goal', goal);
+
+      // The run takes over the screen. RunScreen is the agent-loop UI the
+      // one-shot CLI already uses — plan checklist, live step, token footer —
+      // and it reads a store of its own, fed through the renderer seam. The
+      // transcript pane could not show any of that: it is a flat log.
+      const detachRunUi = attachRunRenderer({
+        overallGoal: goal,
+        model: active.modelName,
+        mode: config.AGENT_MODE,
+        showSteps: process.env.APPCLAW_DEBUG === '1' || process.env.APPCLAW_DEBUG === 'true',
+      });
+      tuiStore.setRunning(true);
+      tuiStore.setRunningGoal(goal);
+      tuiStore.setStopping(false);
+      tuiStore.goTo('run');
+
+      runAbort = new AbortController();
+      let outcome: GoalSessionOutcome | null = null;
       try {
-        const result = await runAgent({
-          goal,
-          displayGoal: goal,
+        outcome = await runGoalSession(goal, {
+          config,
           mcp: active.scopedMcp,
           llm: active.llm,
           appResolver: active.appResolver,
-          maxSteps: config.MAX_STEPS,
-          stepDelay: config.STEP_DELAY,
-          maxElements: config.MAX_ELEMENTS,
-          visionMode: config.VISION_MODE,
           modelName: active.modelName,
-          onStep: (event) => {
-            // The final "done" step's message is the same text as the
-            // Done/Failed summary logged right after runAgent resolves —
-            // showing both back-to-back is a duplicate, not new information.
-            if (event.decision.toolName === 'done') return;
-            tuiStore.log('step', `${event.step}. ${event.decision.toolName}`, event.result.message);
-          },
+          signal: runAbort.signal,
         });
-        tuiStore.log(
-          result.success ? 'result' : 'error',
-          result.success ? `Done — ${result.reason}` : `Failed — ${result.reason}`
-        );
+        lastGoalOutcome = outcome;
         sessionLog.record({
           kind: 'goal',
           input: goal,
-          ok: result.success,
-          message: result.reason,
+          ok: outcome.success,
+          message: outcome.reason,
         });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        tuiStore.log('error', 'Goal execution error', message);
         sessionLog.record({ kind: 'goal', input: goal, ok: false, message });
+        tuiStore.log('error', 'Goal execution error', message);
       } finally {
+        runAbort = null;
+        detachRunUi();
+        // Hand the renderer seam back before leaving the run screen, or core's
+        // next spinner would keep writing into a store nothing is rendering.
+        setRenderer(tuiRenderer);
         active.llm.resetHistory();
+        tuiStore.setRunning(false);
+        tuiStore.setStopping(false);
       }
+
+      if (outcome) {
+        lastRun = { goal, platform: active.platform };
+        // The run screen is the only place the journey summary is ever drawn,
+        // and leaving it takes the sub-goal breakdown, the token count and the
+        // cost with it — a resident shell went back to the prompt holding one
+        // line. The transcript is where the user is now looking, so the summary
+        // is written there too, as the entry's detail block.
+        tuiStore.log(
+          outcome.success ? 'result' : 'error',
+          outcome.success ? `Done — ${outcome.reason}` : `Failed — ${outcome.reason}`,
+          summariseOutcome(outcome)
+        );
+      }
+
+      // `appclaw "goal"` terminates with a status code rather than parking on a
+      // prompt like the resident shell. But it does not exit on its own: the
+      // result — plan outcome, steps, tokens, and the last frame of the device —
+      // is the whole point of having watched, and leaving the alternate screen
+      // erases all of it. So the screen is held until a key is pressed.
+      if (getSnapshot().oneShot) {
+        if (opts.exportPath != null && outcome) {
+          try {
+            exportedSpecPath = await writeGoalExport({
+              goal,
+              outcome,
+              cliPath: opts.exportPath,
+              dir: opts.exportDir ?? config.EXPORT_DIR,
+              provider: config.LLM_PROVIDER,
+              platform: active.platform,
+              agentMode: config.AGENT_MODE,
+            });
+          } catch (err) {
+            tuiStore.log(
+              'error',
+              'Failed to export replay test',
+              err instanceof Error ? err.message : String(err)
+            );
+          }
+        }
+        // Nothing is driving the device any more, and the screen may be held
+        // for as long as it takes someone to come back and look at it —
+        // capturing at 5fps that whole time is pure waste. Pausing rather than
+        // closing is what keeps the final frame on screen while it costs
+        // nothing; tearing the loop down would blank the picture.
+        if (getSnapshot().stream.status === 'running') actions.pauseStream();
+
+        // GoalRunScreen turns the next keypress into quit(), which reads the
+        // same code back off the store.
+        tuiStore.setAwaitingExit({ code: outcome && !outcome.success ? 1 : 0 });
+        return;
+      }
+      tuiStore.goTo('main');
+    },
+
+    /**
+     * `/export` in goal mode: the last agent run as a replayable spec.
+     *
+     * The one-shot CLI has done this since `--export` existed, but only there —
+     * the resident shell held the outcome and had no way to spend it, which is
+     * backwards from how the shell is used: you iterate on a goal until it does
+     * the right thing, and *that* is the moment you want it frozen into a
+     * deterministic test.
+     */
+    async exportGoal(cliPath: string) {
+      if (!lastGoalOutcome || !lastRun) {
+        tuiStore.log(
+          'warn',
+          'No goal run to export yet',
+          'Describe a goal first — /export then writes the steps it took.'
+        );
+        return;
+      }
+      const outcome = lastGoalOutcome;
+      const { goal, platform } = lastRun;
+      try {
+        const filepath = await writeGoalExport({
+          goal,
+          outcome,
+          cliPath,
+          dir: opts.exportDir ?? config.EXPORT_DIR,
+          provider: config.LLM_PROVIDER,
+          platform,
+          agentMode: config.AGENT_MODE,
+        });
+        sessionLog.addExport(filepath);
+        const source = await readFile(filepath, 'utf-8');
+        tuiStore.showViewer({
+          title: basename(filepath),
+          subtitle: outcome.success
+            ? `${outcome.subGoals.length} sub-goal${outcome.subGoals.length === 1 ? '' : 's'} · runner spec`
+            : // Exporting an incomplete run is allowed — a partial trajectory is
+              // often still the useful half — but it must not look like a
+              // recording of something that worked.
+              'from a run that did not complete · check the steps before relying on it',
+          lines: source.split('\n'),
+          language: 'ts',
+          status: {
+            color: outcome.success ? COLORS.green : COLORS.yellow,
+            text: `Saved to ${filepath}\nRun:  appclaw test ${basename(filepath).replace(/\.[^.]+$/, '')}`,
+          },
+        });
+        tuiStore.log('result', `Exported ${relative(process.cwd(), filepath)}`, goal);
+      } catch (err) {
+        tuiStore.log(
+          'error',
+          'Could not export the goal run',
+          err instanceof Error ? err.message : String(err)
+        );
+      }
+    },
+
+    stopRun() {
+      if (!runAbort || runAbort.signal.aborted) return;
+      runAbort.abort();
+      // Cancellation is cooperative: the agent checks between steps, so the
+      // action in flight still finishes. Saying so beats a keypress that looks
+      // ignored for the several seconds a tap-and-settle takes.
+      tuiStore.setStopping(true);
     },
 
     async quit() {
       if (quitting) return;
       quitting = true;
+      // A one-shot run stands in for `appclaw "goal"`, so it has to report the
+      // same thing that did: 0 when every sub-goal completed, 1 otherwise.
+      // Quitting a resident shell is never a failure, whatever the last goal did.
+      const snapshot = getSnapshot();
+      const code =
+        snapshot.awaitingExit?.code ??
+        (snapshot.oneShot && lastGoalOutcome && !lastGoalOutcome.success ? 1 : 0);
       // Don't let a wedged Appium/MCP teardown trap the user in the TUI.
-      const hardExit = setTimeout(() => process.exit(0), 5000);
+      const hardExit = setTimeout(() => process.exit(code), 5000);
       hardExit.unref();
       try {
         sessionLog.finish();
@@ -706,10 +993,37 @@ export async function runTui(opts: RunTuiOptions): Promise<void> {
         setRenderer(null);
         instance.unmount();
         exitAltScreen();
-        process.exit(0);
+        // Printed after leaving the alt screen so it survives in scrollback —
+        // everything the run drew is erased the moment the buffer is restored.
+        if (exportedSpecPath) {
+          console.log(`Exported replay test → ${exportedSpecPath}`);
+        }
+        process.exit(code);
       }
     },
   };
+
+  /**
+   * Everything that normally happens the moment the shell opens: honour the
+   * device flags, or fall through to the pickers. Deferred behind SetupScreen
+   * when the config cannot support a run, and called from saveSettings once it
+   * can — so fixing a missing key continues where it left off rather than
+   * asking the user to relaunch.
+   */
+  async function startAfterSetup(): Promise<void> {
+    tuiStore.goTo('welcome');
+    if (!opts.platform) return;
+    actions.selectPlatform(opts.platform);
+    if (!opts.udid) return;
+    const devices = await listRunningDevices(opts.platform);
+    const match = devices.find((d) => d.udid === opts.udid) ?? {
+      name: opts.deviceName || opts.udid,
+      udid: opts.udid,
+      state: 'unknown',
+      platform: opts.platform,
+    };
+    await actions.selectDevice(match);
+  }
 
   enterAltScreen();
   setRenderer(tuiRenderer);
@@ -734,18 +1048,15 @@ export async function runTui(opts: RunTuiOptions): Promise<void> {
     });
   }
 
-  if (opts.platform) {
-    actions.selectPlatform(opts.platform);
-    if (opts.udid) {
-      const devices = await listRunningDevices(opts.platform);
-      const match = devices.find((d) => d.udid === opts.udid) ?? {
-        name: opts.deviceName || opts.udid,
-        udid: opts.udid,
-        state: 'unknown',
-        platform: opts.platform,
-      };
-      await actions.selectDevice(match);
-    }
+  const issues = collectSetupIssues(config, configProblems);
+  if (issues.length > 0) {
+    // Nothing below this can succeed, so the shell opens on the problem rather
+    // than on a platform picker that leads to a failed session. Fixing it in
+    // settings calls startAfterSetup() from there.
+    tuiStore.setSetupIssues(issues);
+    tuiStore.goTo('setup');
+  } else {
+    await startAfterSetup();
   }
 
   // Keep runTui alive until the app unmounts for any reason (React render

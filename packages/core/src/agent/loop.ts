@@ -89,6 +89,14 @@ export interface AgentOptions {
   /** Model name for token cost calculation */
   modelName?: string;
   onStep?: (event: StepEvent) => void;
+  /**
+   * Cooperative cancellation. Checked at each step boundary, which is the
+   * finest granularity available without threading the signal into every LLM
+   * and MCP call — so a stop lands after the step in flight finishes, not
+   * mid-action. Callers should say "stopping…" the moment they abort rather
+   * than implying it was instant.
+   */
+  signal?: AbortSignal;
   /** Callback to evaluate screen state and potentially rewrite the goal mid-execution */
   screenEvaluator?: (
     currentDom: string,
@@ -166,6 +174,7 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
     modelName = 'unknown',
     onStep,
     screenEvaluator,
+    signal,
   } = options;
 
   const stuck = createStuckDetector();
@@ -280,6 +289,19 @@ export async function runAgent(options: AgentOptions): Promise<AgentResult> {
   }
 
   for (let step = 0; step < maxSteps; step++) {
+    if (signal?.aborted) {
+      ui.stopSpinner();
+      const pricing = MODEL_PRICING[modelName] ?? [0, 0];
+      const cost =
+        (totalInputTokens / 1_000_000) * pricing[0] + (totalOutputTokens / 1_000_000) * pricing[1];
+      return {
+        success: false,
+        reason: 'Stopped',
+        stepsUsed: step,
+        history,
+        totalTokens: { input: totalInputTokens, output: totalOutputTokens, cost },
+      };
+    }
     if (step === 0 && appclawDebug) {
       ui.printAgentBullet('Pulling UI state from the device');
       ui.printAgentBullet('Consulting the agent model for the next action');
