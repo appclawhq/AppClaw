@@ -79,6 +79,13 @@ export interface StreamState {
   /** Which renderer the terminal turned out to support — shown in the panel's status line. */
   backend?: 'kitty' | 'halfblock';
   resolution?: { width: number; height: number };
+  /**
+   * Size of what is actually transmitted, which the cell box is fitted to.
+   * Differs from `resolution` when the frame draws a device body around the
+   * screen — StreamPanel and the frame loop must both fit to THIS or the
+   * placeholder grid and the image disagree.
+   */
+  displaySize?: { width: number; height: number };
 }
 
 /**

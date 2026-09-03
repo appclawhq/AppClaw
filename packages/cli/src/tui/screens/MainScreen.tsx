@@ -3,7 +3,7 @@ import { Box, Text, useInput, useStdout } from 'ink';
 import { COLORS } from '../../ui/ink/theme.js';
 import { subscribe, getSnapshot, tuiStore, type TranscriptEntry } from '../store.js';
 import { executeLine, completeCommand, matchCommands, type TuiActions } from '../commands.js';
-import { appendHistory } from '../input-history.js';
+import { historyLines, recordLine } from '../input-history.js';
 import { Header } from '../components/Header.js';
 import { CommandPalette } from '../components/CommandPalette.js';
 import { StreamPanel } from '../components/StreamPanel.js';
@@ -141,8 +141,13 @@ export function MainScreen({ actions }: MainScreenProps) {
 
   /** Which pane the keyboard belongs to. Shift+Tab moves between them. */
   const [focus, setFocus] = useState<'input' | 'transcript'>('input');
-  /** Lines submitted in this session only — nothing is carried in from disk. */
-  const [history, setHistory] = useState<string[]>([]);
+  /**
+   * Lines submitted in this session only — nothing is carried in from disk.
+   * Read from module scope rather than held in state: this screen is unmounted
+   * whenever a dialog or another screen takes over, and recall has to survive
+   * that (see input-history.ts).
+   */
+  const history = historyLines();
   /**
    * How far back through history we are: 0 is the live draft, 1 the most recent
    * entry. The draft is stashed on the first `↑` so coming back down restores
@@ -286,7 +291,7 @@ export function MainScreen({ actions }: MainScreenProps) {
   async function submit(raw: string): Promise<void> {
     if (ui.running) return; // keep the typed text if the submit is ignored
     setValue('');
-    setHistory((h) => appendHistory(h, raw));
+    recordLine(raw);
     setHistoryIndex(0);
     draftRef.current = '';
     setScrolledBy(0); // jump back to live so the result is visible

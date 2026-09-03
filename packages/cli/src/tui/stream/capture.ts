@@ -1,22 +1,28 @@
 /**
  * Frame capture for the in-terminal device stream.
  *
- * Two shapes, one per render backend:
- *  - `capturePng` (`screencap -p`) for the Kitty path, which hands the PNG
- *    file to the terminal and never decodes it here.
- *  - `captureRaw` (`screencap`, no `-p`) for the half-block path — a raw RGBA
- *    framebuffer, so downsampling is plain arithmetic with no PNG decoder and
- *    therefore no new dependency.
+ * `captureRaw` serves both backends on both platforms: pixels, so downsampling
+ * is plain arithmetic with no image decoder and therefore no new dependency,
+ * and a buffer the device body can be composited into — its rounded outline
+ * needs an alpha channel that neither adb nor simctl will produce.
  *
- * Every adb invocation passes argv as an array: the udid comes from device
+ * Both dispatch on platform: Android goes through `adb exec-out screencap`,
+ * iOS simulators through `xcrun simctl io … screenshot` (see capture-ios.ts,
+ * which explains why that path must write files rather than pipe).
+ *
+ * Every invocation passes argv as an array: the udid comes from device
  * discovery and must never be interpolated into a shell string.
  */
 
 import { execFile } from 'node:child_process';
-import { writeFile } from 'node:fs/promises';
 import { promisify } from 'node:util';
 
+import { captureRawIOS, getDeviceResolutionIOS } from './capture-ios.js';
+
 const execFileAsync = promisify(execFile);
+
+/** The platforms the stream can capture from. */
+export type StreamPlatform = 'android' | 'ios';
 
 /** A raw 1080x2400 frame is ~10MB; execFile's 1MB default would truncate it. */
 const MAX_CAPTURE_BYTES = 64 * 1024 * 1024;
@@ -27,8 +33,14 @@ const CAPTURE_TIMEOUT_MS = 8000;
 export interface RawFrame {
   width: number;
   height: number;
-  /** Tightly packed RGBA, `width * height * 4` bytes. */
+  /** Tightly packed 4-byte pixels, `width * height * 4` bytes, top row first. */
   pixels: Buffer;
+  /**
+   * Channel order within each pixel. Android's `screencap` is RGBA; the BMP
+   * simctl writes is BGRA. Carrying the order beats swapping ~12MB per frame
+   * to normalise it — the renderer resolves its offsets once instead.
+   */
+  order?: 'rgba' | 'bgra';
 }
 
 export interface DeviceResolution {
@@ -45,15 +57,19 @@ async function adb(udid: string, args: string[]): Promise<Buffer> {
   return stdout;
 }
 
-/** Grab one PNG frame straight to `outPath` (the terminal reads the file itself). */
-export async function capturePng(udid: string, outPath: string): Promise<void> {
-  const png = await adb(udid, ['exec-out', 'screencap', '-p']);
-  if (png.length === 0) throw new Error('adb screencap returned no data — is the device still up?');
-  await writeFile(outPath, png);
-}
-
-/** Grab one raw RGBA frame. */
-export async function captureRaw(udid: string): Promise<RawFrame> {
+/**
+ * Grab one frame as pixels.
+ *
+ * `scratchPath` is used only by iOS, which cannot pipe a screenshot and must
+ * land it in a file first. Android ignores it rather than making every caller
+ * branch on platform to decide whether to supply one.
+ */
+export async function captureRaw(
+  platform: StreamPlatform,
+  udid: string,
+  scratchPath: string
+): Promise<RawFrame> {
+  if (platform === 'ios') return captureRawIOS(udid, scratchPath);
   return parseRawScreencap(await adb(udid, ['exec-out', 'screencap']));
 }
 
@@ -94,7 +110,11 @@ export function parseRawScreencap(buf: Buffer): RawFrame {
  * decodes the PNG, so this is the only source of the aspect ratio it needs to
  * size the cell box with.
  */
-export async function getDeviceResolution(udid: string): Promise<DeviceResolution> {
+export async function getDeviceResolution(
+  platform: StreamPlatform,
+  udid: string
+): Promise<DeviceResolution> {
+  if (platform === 'ios') return getDeviceResolutionIOS(udid);
   const out = (await adb(udid, ['shell', 'wm', 'size'])).toString('utf-8');
   // "Physical size: 1080x2400" — optionally followed by "Override size: …",
   // which is what the framebuffer actually is, so the LAST match wins.

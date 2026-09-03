@@ -46,7 +46,7 @@ You'll need **Node.js 22+**, a connected device / emulator / simulator, and an *
 
 That last command opens **Terminal Studio**, the full-screen shell: bare `appclaw` stays resident so you can run one goal after another, and `appclaw "a goal"` runs it once and holds the finished screen until you press a key. `appclaw --tui` opens the same shell in step-recording mode instead. Add `APPCLAW_TUI=off` for an unattended run that prints to the console and exits on its own.
 
-Terminal Studio can mirror the device inside the terminal — `^r` starts it, `^p` pauses, `^x` closes (Android only; `--stream` starts it from the command line). It looks best on a terminal that speaks the kitty graphics protocol — Ghostty, kitty, WezTerm — and falls back to half-block characters elsewhere.
+Terminal Studio can mirror the device inside the terminal — `^r` starts it, `^p` pauses, `^x` closes (`--stream` starts it from the command line). It works with an Android device or emulator and with an iOS simulator, and draws the screen inside a device body so it reads as a phone rather than a rectangle. It looks best on a terminal that speaks the kitty graphics protocol — Ghostty, kitty, WezTerm — and falls back to half-block characters elsewhere.
 
 ## What it can do
 

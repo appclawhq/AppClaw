@@ -143,9 +143,10 @@ export function StreamPanel({ device, stream, width, imageRows }: StreamPanelPro
   const areaCols = panelImageCols(termCols);
   // The frame loop sizes the transmitted image with the same call on the same
   // numbers, so the cell box and the placeholder grid always agree.
-  const fitted = stream.resolution
-    ? streamCells(termCols, termRows, stream.resolution.width, stream.resolution.height)
-    : null;
+  // Fitted to what is transmitted (the device body, when there is one), but
+  // labelled with the real screen resolution below.
+  const display = stream.displaySize ?? stream.resolution;
+  const fitted = display ? streamCells(termCols, termRows, display.width, display.height) : null;
   // Paused counts as showing a picture: the image is still loaded in the
   // terminal, so the placeholder cells must keep being drawn or the frame the
   // pause exists to hold would disappear.
