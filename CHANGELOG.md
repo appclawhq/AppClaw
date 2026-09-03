@@ -1,3 +1,9 @@
+## [2.7.0](https://github.com/appclawhq/AppClaw/compare/v2.6.0...v2.7.0) (2026-09-03)
+
+### Features
+
+* **streaming:** support iOS simulator with screen curved, framing ([#62](https://github.com/appclawhq/AppClaw/issues/62)) ([a79e4b1](https://github.com/appclawhq/AppClaw/commit/a79e4b1113f7366a93ec173b6c93870301713d2e))
+
 ## [2.6.0](https://github.com/appclawhq/AppClaw/compare/v2.5.0...v2.6.0) (2026-08-31)
 
 ### Features
