@@ -266,6 +266,8 @@ export type FlowStep =
       selector?: ElementSelector;
       properties?: ElementPropertyExpectations;
       count?: NumericExpectation;
+      /** When true, assert passes if element is NOT visible/present. */
+      negate?: boolean;
     } & Verbatim)
   | ({
       kind: 'scrollAssert';

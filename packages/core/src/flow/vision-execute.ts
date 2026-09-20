@@ -45,6 +45,13 @@ export let lastVisionScreenshot: string | null = null;
 /** Max edge for screenshots sent to Stark vision. 512px for faster Gemini processing. */
 const VISION_MAX_EDGE_PX = 512;
 
+/** Detect if a query is a negative assertion (e.g., "verify X is not visible") */
+function isNegativeQuery(query: string): boolean {
+  return /\b(?:is\s+not|not\s+(?:visible|present|shown|displayed|on\s+screen)|hidden|absent|gone|not\s+there|disappear)/i.test(
+    query
+  );
+}
+
 /** Downscale screenshot for vision — outputs JPEG (not PNG) to avoid size inflation. */
 export async function downscaleForVision(base64: string): Promise<string> {
   try {
@@ -579,11 +586,12 @@ export async function visionExecute(
     } catch {
       visible = /\btrue\b/i.test(visResponse) && !/\bfalse\b/i.test(visResponse);
     }
+    const negate = isNegativeQuery(visQuery);
     return {
-      step: { kind: 'assert', text: visQuery, verbatim: instruction },
+      step: { kind: 'assert', text: visQuery, negate: negate || undefined, verbatim: instruction },
       result: {
-        success: visible,
-        message: visible
+        success: visible === !negate,
+        message: visible === !negate
           ? `Assertion passed (via vision)${explanation ? ` — ${explanation}` : ''}`
           : `Assertion failed: ${explanation || 'not verified on screen'}`,
       },

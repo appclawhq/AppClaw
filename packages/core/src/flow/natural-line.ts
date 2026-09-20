@@ -489,6 +489,18 @@ export function tryParseNaturalFlowLine(line: string): FlowStep | null {
   );
   if (enterMatch) return { kind: 'enter', verbatim };
 
+  const assertNotMatch =
+    t.match(
+      /^(?:assert|verify|check)\s+(?:that\s+|if\s+)?["']?(.+?)["']?\s+is\s+(?:not\s+(?:visible|present|shown|displayed|on\s+(?:the\s+)?screen|in\s+(?:the\s+)?screen)|hidden|absent|gone|not\s+there|disappear(?:ed|ing)?)$/i
+    ) ??
+    t.match(
+      /^(?:assert|verify|check)\s+(?:that\s+|if\s+)?["']?(.+?)["']?\s+(?:is\s+)?(?:not\s+visible|not\s+present|not\s+shown|not\s+displayed|hidden|absent|gone)$/i
+    );
+  if (assertNotMatch) {
+    const text = stripTextPrefix(assertNotMatch[1].trim());
+    if (text) return { kind: 'assert', text, negate: true, verbatim };
+  }
+
   const assertMatch =
     t.match(
       /^(?:assert|verify|check)\s+(?:that\s+|if\s+)?["']?(.+?)["']?\s+is\s+(?:visible|present|shown|displayed|on\s+(?:the\s+)?screen|in\s+(?:the\s+)?screen)$/i
