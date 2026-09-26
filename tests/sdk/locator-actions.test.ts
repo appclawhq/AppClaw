@@ -63,16 +63,12 @@ describe('locator-actions helpers', () => {
     expect(resolveTypeInstruction({ nl: "type 'a' in Search", text: 'a' })).toBe(
       "type 'a' in Search"
     );
-    expect(resolveTypeInstruction({ name: 'Search', text: 'ITC' })).toBe(
-      "type 'ITC' into Search"
-    );
+    expect(resolveTypeInstruction({ name: 'Search', text: 'ITC' })).toBe("type 'ITC' into Search");
     expect(resolveTypeInstruction({ id: 'field', text: 'x' })).toBe("type 'x' into field");
   });
 
   test('resolveTextInstruction', () => {
-    expect(resolveTextInstruction({ name: 'CTA', expected: 'BUY' })).toBe(
-      "assert CTA is 'BUY'"
-    );
+    expect(resolveTextInstruction({ name: 'CTA', expected: 'BUY' })).toBe("assert CTA is 'BUY'");
     expect(resolveTextInstruction({ name: 'CTA' })).toBe('get text of CTA');
   });
 
@@ -82,5 +78,4 @@ describe('locator-actions helpers', () => {
     expect(textMatches('Order #42', '^Order #\\d+$', 'matches')).toBe(true);
     expect(textMatches('nope', 'yes', 'equals')).toBe(false);
   });
-
 });

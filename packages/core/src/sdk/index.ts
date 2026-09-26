@@ -551,9 +551,7 @@ export class AppClaw {
   async assertTextByLocator(opts: AssertTextByLocatorOptions): Promise<LocatorActionResult> {
     const expected = (opts.expected ?? opts.name)?.trim();
     if (!expected) {
-      throw new Error(
-        'assertTextByLocator requires `expected` (or `name` as the expected text)'
-      );
+      throw new Error('assertTextByLocator requires `expected` (or `name` as the expected text)');
     }
     const match = opts.match ?? 'equals';
     const instruction = resolveTextInstruction({ ...opts, expected });

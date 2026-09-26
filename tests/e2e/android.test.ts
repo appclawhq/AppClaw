@@ -33,10 +33,11 @@ describe('SDK E2E — teardown after use', () => {
       agentMode: 'dom',
     });
 
-
     // Get page structure to see all elements
     console.log('\n========== DEBUGGING WATCHLIST ELEMENT ==========\n');
-    const inspectResult = await app.run('list all the elements on the screen with their types and attributes');
+    const inspectResult = await app.run(
+      'list all the elements on the screen with their types and attributes'
+    );
     console.log('Page Structure:\n', inspectResult.message);
 
     // Try different xpath/locator combinations
@@ -117,7 +118,11 @@ describe('SDK E2E — teardown after use', () => {
         xpath: "//android.widget.FrameLayout[@content-desc='Watchlist']",
         skipNl: true,
       });
-      console.log('Alternative xpath result:', result3alt.success ? '✓ SUCCESS' : '✗ FAILED -', result3alt.message);
+      console.log(
+        'Alternative xpath result:',
+        result3alt.success ? '✓ SUCCESS' : '✗ FAILED -',
+        result3alt.message
+      );
     }
 
     await app.teardown();

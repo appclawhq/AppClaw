@@ -591,9 +591,10 @@ export async function visionExecute(
       step: { kind: 'assert', text: visQuery, negate: negate || undefined, verbatim: instruction },
       result: {
         success: visible === !negate,
-        message: visible === !negate
-          ? `Assertion passed (via vision)${explanation ? ` — ${explanation}` : ''}`
-          : `Assertion failed: ${explanation || 'not verified on screen'}`,
+        message:
+          visible === !negate
+            ? `Assertion passed (via vision)${explanation ? ` — ${explanation}` : ''}`
+            : `Assertion failed: ${explanation || 'not verified on screen'}`,
       },
     };
   }

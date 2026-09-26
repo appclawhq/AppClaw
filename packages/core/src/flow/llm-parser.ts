@@ -81,7 +81,11 @@ const stepSchema = z.discriminatedUnion('kind', [
     text: z.string().optional().describe('Text/element to wait for (not needed for screenLoaded)'),
     timeoutSeconds: z.number().describe('Timeout in seconds, default 10'),
   }),
-  z.object({ kind: z.literal('assert'), text: z.string().describe('Text to verify is visible'), negate: z.boolean().optional().describe('When true, assert passes if text is NOT visible') }),
+  z.object({
+    kind: z.literal('assert'),
+    text: z.string().describe('Text to verify is visible'),
+    negate: z.boolean().optional().describe('When true, assert passes if text is NOT visible'),
+  }),
   z.object({
     kind: z.literal('scrollAssert'),
     text: z.string(),

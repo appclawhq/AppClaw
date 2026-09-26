@@ -10,11 +10,7 @@
  * failOnError / soft semantics.
  */
 
-import {
-  extractText,
-  findElement,
-  isMCPError,
-} from '../mcp/tools.js';
+import { extractText, findElement, isMCPError } from '../mcp/tools.js';
 import type { LocatorStrategy, MCPClient } from '../mcp/types.js';
 import type { RunResult } from './types.js';
 
@@ -119,9 +115,9 @@ export function hasClassicLocator(opts: LocatorSpec): boolean {
   const ids = normalizeIds(opts.id);
   return Boolean(
     ids.length ||
-      opts.labels?.length ||
-      opts.accessibilityIds?.length ||
-      (typeof opts.xpath === 'string' ? opts.xpath : opts.xpath?.length)
+    opts.labels?.length ||
+    opts.accessibilityIds?.length ||
+    (typeof opts.xpath === 'string' ? opts.xpath : opts.xpath?.length)
   );
 }
 

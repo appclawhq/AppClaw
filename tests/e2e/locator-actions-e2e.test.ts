@@ -29,7 +29,7 @@ describe('SDK E2E — locator-based actions', () => {
     // The `skipNl: true` tells AppClaw to skip natural-language resolution.
     const result = await app.tapByLocator({
       name: 'Watchlist',
-      accessibilityIds: ['Watchlist'],  // Must be an array to try multiple values
+      accessibilityIds: ['Watchlist'], // Must be an array to try multiple values
       skipNl: true,
     });
 
