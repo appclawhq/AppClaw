@@ -81,7 +81,11 @@ const stepSchema = z.discriminatedUnion('kind', [
     text: z.string().optional().describe('Text/element to wait for (not needed for screenLoaded)'),
     timeoutSeconds: z.number().describe('Timeout in seconds, default 10'),
   }),
-  z.object({ kind: z.literal('assert'), text: z.string().describe('Text to verify is visible') }),
+  z.object({
+    kind: z.literal('assert'),
+    text: z.string().describe('Text to verify is visible'),
+    negate: z.boolean().optional().describe('When true, assert passes if text is NOT visible'),
+  }),
   z.object({
     kind: z.literal('scrollAssert'),
     text: z.string(),
@@ -145,7 +149,7 @@ const SYSTEM_PROMPT =
   `- "swipe/scroll <direction>" → swipe\n` +
   `- "zoom in [Nx] [on/into/the <element>]" → zoom (scale > 1), "zoom out [on <element>]" → zoom (scale < 1). e.g. "zoom in the map", "zoom in 2x on the image"\n` +
   `- "pinch in/out [on/into/the <element>]" → zoom\n` +
-  `- "verify/check/assert <text>" → assert\n` +
+  `- "verify/check/assert <text>" → assert; add negate=true for "verify <text> is not visible/hidden/absent/gone"\n` +
   `- "scroll until <text> visible" → scrollAssert ` +
   `(swiping inside a named carousel — "swipe the <item> left until <text> visible" — sets target=<item>)\n` +
   `- "go back" → back, "go home" → home\n` +

@@ -1912,7 +1912,8 @@ async function assertTextVisible(
   mcp: MCPClient,
   text: string,
   poll: FlowTapPollOptions,
-  allowVision = true
+  allowVision = true,
+  negate = false
 ): Promise<ActionResult> {
   const visionFirst = allowVision && isVisionMode();
   const useVision = allowVision && isVisionLocateEnabled();
@@ -1924,8 +1925,11 @@ async function assertTextVisible(
     // For spatial assertions, get elements and evaluate the relationship
     lastElements = await getScreenElements(mcp);
     const { satisfied, reason } = evaluateSpatialRelation(lastElements, spatial);
-    if (satisfied) {
-      return { success: true, message: `Assertion passed: ${reason}` };
+    if (satisfied === !negate) {
+      const verdict = negate
+        ? `Assertion passed: ${reason.replace('is', 'is not').replace('below', 'not below').replace('above', 'not above')}`
+        : `Assertion passed: ${reason}`;
+      return { success: true, message: verdict };
     }
     return { success: false, message: `Assertion failed: ${reason}` };
   }
@@ -1934,8 +1938,11 @@ async function assertTextVisible(
   if (visionFirst) {
     // ── Vision mode: screenshot + LLM yes/no verification ──
     const visible = await visionAssert(mcp, text);
-    if (visible) {
-      return { success: true, message: `Verified "${text}" is visible (via vision)` };
+    if (visible === !negate) {
+      const verdict = negate
+        ? `Verified "${text}" is not visible (via vision)`
+        : `Verified "${text}" is visible (via vision)`;
+      return { success: true, message: verdict };
     }
     // Grab screen elements for the failure message
     try {
@@ -1948,8 +1955,12 @@ async function assertTextVisible(
     const domPolls = useVision ? ASSERT_DOM_POLLS_BEFORE_VISION : poll.maxAttempts;
     for (let attempt = 0; attempt < domPolls; attempt++) {
       lastElements = await getScreenElements(mcp);
-      if (domContainsText(lastElements, text)) {
-        return { success: true, message: `Verified "${text}" is visible` };
+      const found = domContainsText(lastElements, text);
+      if (found === !negate) {
+        const verdict = negate
+          ? `Verified "${text}" is not visible`
+          : `Verified "${text}" is visible`;
+        return { success: true, message: verdict };
       }
       if (attempt + 1 < domPolls) await sleep(poll.intervalMs);
     }
@@ -1957,8 +1968,11 @@ async function assertTextVisible(
     // Vision fallback in DOM mode
     if (useVision) {
       const visible = await visionAssert(mcp, text);
-      if (visible) {
-        return { success: true, message: `Verified "${text}" is visible (via vision)` };
+      if (visible === !negate) {
+        const verdict = negate
+          ? `Verified "${text}" is not visible (via vision)`
+          : `Verified "${text}" is visible (via vision)`;
+        return { success: true, message: verdict };
       }
     }
   }
@@ -1971,9 +1985,13 @@ async function assertTextVisible(
       ? `\n    Screen contains: ${uniqueTexts.join(' | ')}`
       : '\n    Screen: (no text elements found)';
 
+  const failMsg = negate
+    ? `Assertion failed: "${text}" is visible but expected not to be${screenSummary}`
+    : `Assertion failed: "${text}" not found on screen${screenSummary}`;
+
   return {
     success: false,
-    message: `Assertion failed: "${text}" not found on screen${screenSummary}`,
+    message: failMsg,
   };
 }
 
@@ -2711,7 +2729,7 @@ async function executeStepUnredacted(
     case 'assert':
       return step.selector
         ? assertStructuredSelector(mcp, step.selector, step.properties, step.count, tapPoll)
-        : assertTextVisible(mcp, step.text ?? '', tapPoll, !step.sensitive);
+        : assertTextVisible(mcp, step.text ?? '', tapPoll, !step.sensitive, step.negate ?? false);
     case 'scrollAssert':
       return scrollUntilVisible(
         mcp,

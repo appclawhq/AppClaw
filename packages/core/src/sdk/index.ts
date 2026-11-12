@@ -43,6 +43,20 @@ import { AppClawAssertionError, AppClawStepError } from './types.js';
 import type { AppClawOptions, FlowResult, RunResult, RunOptions } from './types.js';
 import type { ScrollControl } from '../flow/run-yaml-flow.js';
 import type { AgentResult } from '../agent/loop.js';
+import { screenshot } from '../mcp/tools.js';
+import {
+  executeLocatorGetText,
+  executeLocatorTap,
+  executeLocatorType,
+  resolveTapInstruction,
+  resolveTextInstruction,
+  resolveTypeInstruction,
+  textMatches,
+  type AssertTextByLocatorOptions,
+  type LocatorActionOptions,
+  type LocatorActionResult,
+  type TypeByLocatorOptions,
+} from './locator-actions.js';
 
 /**
  * Convert a (timeout, interval) pair into the engine's poll budget.
@@ -240,8 +254,8 @@ export class AppClaw {
     );
     const result = await runner.run(instruction);
 
-    // Track first failure for report finalization
-    if (!result.success && this.runSuccess) {
+    // Track first failure for report finalization — soft steps stay green.
+    if (!result.success && this.runSuccess && !options.soft) {
       this.runSuccess = false;
       this.runFailedAt = stepIndex;
       this.runFailureReason = result.message;
@@ -249,8 +263,9 @@ export class AppClaw {
 
     // Default: throw on failure so the surrounding test framework fails the
     // test and the next step doesn't fire on top of a broken screen. Skipped
-    // when the caller is `verify()` — that path handles its own error class.
-    if (!result.success && this.failOnError && !this.suppressFailThrow) {
+    // when the caller is `verify()` — that path handles its own error class —
+    // or when `{ soft: true }` (best-effort / locator fallback probe).
+    if (!result.success && this.failOnError && !this.suppressFailThrow && !options.soft) {
       throw new AppClawStepError(instruction, result);
     }
 
@@ -298,6 +313,291 @@ export class AppClaw {
         screenContents = await snapshotVisibleTexts(client);
       }
       throw new AppClawAssertionError(claim, result, screenContents);
+    }
+    return result;
+  }
+
+  /**
+   * Platform used for locator strategy ordering (id vs a11y vs iOS predicate).
+   * Empty PLATFORM falls back to android — same default as session creation.
+   */
+  private get locatorPlatform(): 'android' | 'ios' {
+    return this.config.PLATFORM === 'ios' ? 'ios' : 'android';
+  }
+
+  /**
+   * NL-first / Appium-locator fallback. Pass `{ skipNl: true }` for locator only.
+   * On iOS, locator is tried before NL (page-source dumps are costly).
+   */
+  private async runWithLocatorFallback(
+    instruction: string,
+    runLocator: () => Promise<LocatorActionResult>,
+    options?: { soft?: boolean; skipNl?: boolean; waitTimeout?: number; waitInterval?: number }
+  ): Promise<LocatorActionResult> {
+    const iosLocatorFirst = this.locatorPlatform === 'ios' && !options?.skipNl;
+    const skipNl = Boolean(options?.skipNl) || iosLocatorFirst;
+    const nlOpts: RunOptions = {
+      soft: true,
+      waitTimeout: options?.waitTimeout,
+      waitInterval: options?.waitInterval,
+    };
+
+    if (!skipNl) {
+      const nl = await this.run(instruction, nlOpts);
+      if (nl.success) {
+        return { ...nl, via: 'nl' };
+      }
+    }
+
+    const result = await runLocator();
+    if (result.success) return result;
+
+    // iOS: if locator missed, one NL attempt can still help on light screens.
+    if (iosLocatorFirst) {
+      const nl = await this.run(instruction, nlOpts);
+      if (nl.success) {
+        return { ...nl, via: 'nl' };
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * Record a locator-only action as a named step in the HTML report
+   * (NL successes already go through `app.run` reporting).
+   */
+  private async recordLocatorStep(opts: {
+    kind: string;
+    instruction: string;
+    target?: string;
+    success: boolean;
+    message: string;
+    soft?: boolean;
+  }): Promise<number> {
+    const stepIndex = ++this.runStepCounter;
+    if (this.collector) {
+      this.collector.startStep(stepIndex);
+      this.collector.addStep({
+        index: stepIndex,
+        kind: opts.kind,
+        verbatim: opts.instruction,
+        target: opts.target,
+        phase: 'test',
+        status: opts.success ? 'passed' : 'failed',
+        message: opts.message,
+        error: opts.success ? undefined : opts.message,
+      });
+      try {
+        const { client } = await this.session.connect();
+        const shot = await screenshot(client).catch(() => null);
+        if (shot) this.collector.attachScreenshot(stepIndex, shot);
+      } catch {
+        /* reporting must never fail the test over a missing screenshot */
+      }
+    }
+
+    if (!this.silent) {
+      const mark = opts.success ? '✓' : '✗';
+      const label = opts.target ? ` "${opts.target}"` : '';
+      console.log(`  ${mark} #${stepIndex}  ${opts.kind.padEnd(8)} ${label}`);
+      if (opts.message) {
+        console.log(`    ●  ${opts.message}`);
+      }
+    }
+
+    if (!opts.success && !opts.soft && this.runSuccess) {
+      this.runSuccess = false;
+      this.runFailedAt = stepIndex;
+      this.runFailureReason = opts.message;
+    }
+
+    return stepIndex;
+  }
+
+  private finishLocatorResult(
+    instruction: string,
+    result: LocatorActionResult,
+    soft?: boolean
+  ): LocatorActionResult {
+    if (!result.success && this.failOnError && !soft) {
+      throw new AppClawStepError(instruction, result);
+    }
+    return result;
+  }
+
+  /**
+   * Tap via Appium locator (id / a11y / xpath / UiAutomator / iOS predicate).
+   * Tries natural language first unless `{ skipNl: true }` (or on iOS, where
+   * locator is preferred first).
+   *
+   * @example
+   * await app.tapByLocator({ nl: 'tap Search', id: 'com.example:id/search' });
+   * await app.tapByLocator({ name: 'Holdings', xpath: '//*[@text="Holdings"]', skipNl: true });
+   * await app.tapByLocator({
+   *   name: 'PORTFOLIO',
+   *   uiautomator: 'new UiSelector().text("PORTFOLIO")',
+   *   skipNl: true,
+   * });
+   */
+  async tapByLocator(opts: LocatorActionOptions): Promise<LocatorActionResult> {
+    const instruction = resolveTapInstruction(opts);
+    const target = opts.name?.trim() || opts.labels?.[0];
+    const result = await this.runWithLocatorFallback(
+      instruction,
+      async () => {
+        const { client } = await this.session.connect();
+        return executeLocatorTap(client, opts, this.locatorPlatform);
+      },
+      opts
+    );
+
+    if (result.via === 'locator') {
+      await this.recordLocatorStep({
+        kind: 'tap',
+        instruction,
+        target,
+        success: result.success,
+        message: result.message,
+        soft: opts.soft,
+      });
+    }
+
+    return this.finishLocatorResult(instruction, result, opts.soft);
+  }
+
+  /**
+   * Type via Appium locator. Same NL→locator pattern as `tapByLocator`.
+   *
+   * @example
+   * await app.typeByLocator({
+   *   nl: "type 'ITC' in Search",
+   *   text: 'ITC',
+   *   id: 'com.example:id/search_input',
+   * });
+   * await app.typeByLocator({ name: 'Search', text: 'ITC', id: '...', skipNl: true });
+   */
+  async typeByLocator(opts: TypeByLocatorOptions): Promise<LocatorActionResult> {
+    const instruction = resolveTypeInstruction(opts);
+    const target = opts.name?.trim();
+    const result = await this.runWithLocatorFallback(
+      instruction,
+      async () => {
+        const { client } = await this.session.connect();
+        return executeLocatorType(client, opts, this.locatorPlatform);
+      },
+      opts
+    );
+
+    if (result.via === 'locator') {
+      await this.recordLocatorStep({
+        kind: 'type',
+        instruction,
+        target,
+        success: result.success,
+        message: result.message,
+        soft: opts.soft,
+      });
+    }
+
+    return this.finishLocatorResult(instruction, result, opts.soft);
+  }
+
+  /**
+   * Read visible text from a locator. Locator-only by default (`skipNl` defaults true).
+   *
+   * @example
+   * const { text } = await app.getTextByLocator({ name: 'CTA', id: '…', skipNl: true });
+   */
+  async getTextByLocator(opts: LocatorActionOptions): Promise<LocatorActionResult> {
+    const instruction = resolveTextInstruction(opts);
+    const target = opts.name?.trim();
+    const skipNl = opts.skipNl !== false;
+    const result = await this.runWithLocatorFallback(
+      instruction,
+      async () => {
+        const { client } = await this.session.connect();
+        return executeLocatorGetText(client, opts, this.locatorPlatform);
+      },
+      { ...opts, skipNl }
+    );
+
+    if (result.via === 'locator') {
+      await this.recordLocatorStep({
+        kind: 'gettext',
+        instruction,
+        target,
+        success: result.success,
+        message: result.message,
+        soft: opts.soft,
+      });
+    }
+
+    return this.finishLocatorResult(instruction, result, opts.soft);
+  }
+
+  /**
+   * Get text via locator and assert against `expected`.
+   * Locator-only by default (`skipNl` defaults true).
+   *
+   * @example
+   * await app.assertTextByLocator({
+   *   name: 'Place buy CTA',
+   *   expected: 'PLACE BUY ORDER',
+   *   id: '…',
+   *   skipNl: true,
+   * });
+   */
+  async assertTextByLocator(opts: AssertTextByLocatorOptions): Promise<LocatorActionResult> {
+    const expected = (opts.expected ?? opts.name)?.trim();
+    if (!expected) {
+      throw new Error('assertTextByLocator requires `expected` (or `name` as the expected text)');
+    }
+    const match = opts.match ?? 'equals';
+    const instruction = resolveTextInstruction({ ...opts, expected });
+    const target = opts.name?.trim();
+    const skipNl = opts.skipNl !== false;
+
+    const result = await this.runWithLocatorFallback(
+      instruction,
+      async () => {
+        const { client } = await this.session.connect();
+        const got = await executeLocatorGetText(client, opts, this.locatorPlatform);
+        if (!got.success || got.text == null) {
+          return {
+            success: false,
+            action: 'assert',
+            message: got.message || `Could not read text for assert: ${instruction}`,
+            via: 'locator' as const,
+          };
+        }
+        const ok = textMatches(got.text, expected, match);
+        return {
+          success: ok,
+          action: 'assert',
+          message: ok
+            ? `Asserted ${target ?? 'element'} is '${expected}'`
+            : `Expected '${expected}' (${match}) but got '${got.text}'`,
+          via: 'locator' as const,
+          text: got.text,
+        };
+      },
+      { ...opts, skipNl }
+    );
+
+    if (result.via === 'locator') {
+      await this.recordLocatorStep({
+        kind: 'assert',
+        instruction,
+        target,
+        success: result.success,
+        message: result.message,
+        soft: opts.soft,
+      });
+    }
+
+    if (!result.success && this.failOnError && !opts.soft) {
+      throw new AppClawAssertionError(expected, result);
     }
     return result;
   }
@@ -441,3 +741,20 @@ export {
   keepOnlyFinalAttempt,
 } from './goal-export.js';
 export type { GenerateSdkTestConfig } from './goal-export.js';
+export {
+  escapeIosPredicateValue,
+  iosLabelPredicate,
+  resolveNativeLocator,
+  findByStrategy,
+  tapByStrategy,
+  typeByStrategy,
+  getTextByStrategy,
+} from './locator-actions.js';
+export type {
+  LocatorSpec,
+  LocatorActionOptions,
+  LocatorActionResult,
+  TypeByLocatorOptions,
+  AssertTextByLocatorOptions,
+} from './locator-actions.js';
+export type { LocatorStrategy } from '../mcp/types.js';

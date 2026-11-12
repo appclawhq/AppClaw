@@ -37,6 +37,11 @@ export interface RunOptions {
    * sets the repeat count. Overrides any count parsed from the instruction.
    */
   scrollTimes?: number;
+  /**
+   * Soft / best-effort step: never throw, and do not mark the overall HTML report
+   * as failed when this step misses. Used by locator fallbacks and optional UI.
+   */
+  soft?: boolean;
 }
 
 /**
