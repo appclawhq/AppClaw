@@ -1,3 +1,9 @@
+## [2.8.0](https://github.com/appclawhq/AppClaw/compare/v2.7.0...v2.8.0) (2026-11-12)
+
+### Features
+
+* add locator based actions and SDK support ([#63](https://github.com/appclawhq/AppClaw/issues/63)) ([3bf42d4](https://github.com/appclawhq/AppClaw/commit/3bf42d47f52fbf7576265de16cd51abbf5b24ec8))
+
 ## [2.7.0](https://github.com/appclawhq/AppClaw/compare/v2.6.0...v2.7.0) (2026-09-03)
 
 ### Features
